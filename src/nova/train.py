@@ -216,7 +216,7 @@ class Trainer:
                 # the user creates the loader.
                 # BUT the user said: "train.py'ye ekle: Her epoch'ta yeni loader oluştur"
                 # So we must recreate it.
-                train_loader_instance = CurriculumLoader(epoch=epoch, max_seq_len=self.config["model"]["max_seq_len"])
+                train_loader_instance = CurriculumLoader(epoch=epoch, max_seq_len=self.config["dataset"]["max_seq_len"])
                 
                 if is_streaming:
                      steps_per_epoch = self.config["training"].get("steps_per_epoch", 1000)
