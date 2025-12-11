@@ -74,40 +74,59 @@ class CurriculumLoader:
             except Exception as e:
                 logger.warning(f"Failed to load {key}: {e}")
 
-        # Corpus
-        # We skip the first 2048 samples to avoid overlap with validation set (if it uses train subset)
+        # Helper to resolve dataset path/config from new nested structure or old flat string
+        def get_source_info(type_key):
+             # 1. Try nested *_sources (e.g. code_sources)
+             sources = self.datasets_config.get(f"{type_key}_sources")
+             if sources and isinstance(sources, dict):
+                 # Just take the first one for now as per current logic, or we could flatten all
+                 # But CurriculumLoader structure seems to treat 'code' as one component.
+                 # Let's verify if we need to merge them. For now, picking the first valid one is safer than crashing.
+                 for name, cfg in sources.items():
+                     if isinstance(cfg, dict) and "path" in cfg:
+                         return cfg["path"], cfg.get("config_name"), cfg.get("weight", 1.0)
+             
+             # 2. Try direct key (flat string)
+             val = self.datasets_config.get(type_key)
+             if isinstance(val, str):
+                 return val, None, 1.0
+                 
+             return None, None, 0.0
+
         # Corpus
         # Use the specialized loader from dataset.py to mix Cosmos/BellaTurca
         from nova.data.dataset import load_turkish_corpus
         
         # We need to construct a mini-config for the corpus loader
-        # Ideally this comes from the main clean config, but we mock it here if needed
-        # or we assume self.datasets_config might have it if passed properly
-        corpus_config = {
-             "corpus_sources": {
-                 "cosmos": {"path": "ytu-ce-cosmos/Cosmos-Turkish-Corpus-v1.0", "weight": 0.5},
-                 "bellaturca": {"path": "turkish-nlp-suite/BellaTurca", "config_name": "OzenliDerlem", "weight": 0.5},
-             }
-        }
-        
+        # We pass the full datasets_config which contains 'corpus_sources'
         try_load("corpus", 
-                 lambda: load_turkish_corpus(corpus_config, split="train", streaming=True).map(self._extract_corpus),
+                 lambda: load_turkish_corpus(self.datasets_config, split="train", streaming=True).map(self._extract_corpus),
                  self.ratios.get("corpus", 0.0))
         
         # Code
-        try_load("code", 
-                 lambda: load_dataset(self.datasets_config["code"], data_dir="data/python", split="train", streaming=True).map(self._extract_code),
-                 self.ratios.get("code", 0.0))
+        code_path, code_name, _ = get_source_info("code")
+        if code_path:
+            try_load("code", 
+                     lambda: load_dataset(code_path, name=code_name, data_dir="data/python" if "stack" in code_path else None, split="train", streaming=True).map(self._extract_code),
+                     self.ratios.get("code", 0.0))
+        else:
+             logger.warning("No 'code' source found in config.")
         
         # Instruct
-        try_load("instruct", 
-                 lambda: load_dataset(self.datasets_config["instruct"], split="train", streaming=True).map(self._extract_instr),
-                 self.ratios.get("instruct", 0.0))
-                 
+        instr_path, instr_name, _ = get_source_info("instruction") # config key is instruction_sources
+        if not instr_path: instr_path, instr_name, _ = get_source_info("instruct") # falback
+        
+        if instr_path:
+            try_load("instruct", 
+                     lambda: load_dataset(instr_path, name=instr_name, split="train", streaming=True).map(self._extract_instr),
+                     self.ratios.get("instruct", 0.0))
+        
         # CoT
-        try_load("cot", 
-                 lambda: load_dataset(self.datasets_config["cot"], split="train", streaming=True).map(self._extract_cot),
-                 self.ratios.get("cot", 0.0))
+        cot_path, cot_name, _ = get_source_info("cot")
+        if cot_path:
+            try_load("cot", 
+                     lambda: load_dataset(cot_path, name=cot_name, split="train", streaming=True).map(self._extract_cot),
+                     self.ratios.get("cot", 0.0))
 
         # 3. Fallback Mechanism
         if not loaded_datasets:
