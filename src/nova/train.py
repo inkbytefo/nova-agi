@@ -118,7 +118,7 @@ class Trainer:
         
         grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
         (loss, metrics), grads = grad_fn(state.params)
-        
+        metrics["loss"] = loss
         return grads, metrics
 
     @staticmethod
@@ -145,10 +145,10 @@ class Trainer:
 
     @staticmethod
     def _eval_logic(state, x, H, y, mask, alpha, beta):
-        logits, embeddings = state.apply_fn({'params': state.params}, x, H, train=False)
         loss, metrics = nova_loss(
             state.params, logits, y, embeddings, mask=mask, alpha=alpha, beta=beta
         )
+        metrics["loss"] = loss
         return metrics
 
     @staticmethod
