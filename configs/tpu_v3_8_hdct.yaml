@@ -1,0 +1,34 @@
+# configs/tpu_v3_8_hdct.yaml
+
+defaults:
+  - _self_
+  - dataset: turkish_v2
+
+model:
+  hidden_dim: 768
+  num_layers: 12          # layers değil num_layers (kodda böyle)
+  out_dim: 5000           # HypergraphTokenizer vocab_size ≈ 5000
+  vocab_size: 5000         # HDCT character-level
+  embedding_dim: 768
+  use_attention: true
+  dropout_rate: 0.1
+
+training:
+  lr: 3e-4
+  epochs: 20
+  batch_size: 512          # TPU v3-8’de 1024 OOM verir (2048 seq_len + char-level)
+  global_batch_size: 512   # 8 core → per-core 64
+  max_seq_len: 2048
+  steps_per_epoch: 5000
+  val_steps: 200
+  seed: 42
+  beta: 0.02               # diversity’yi biraz artırdık, Türkçe’de işe yarıyor
+  use_wandb: true
+
+dataset:
+  max_seq_len: 2048
+
+use_wandb: true
+wandb_project: "nova-hdct-turkish"
+run_name: "tpu-v3-8-hdct-v1"
+checkpoint_dir: "gs://your-bucket/nova-checkpoints/hdct-v1"   # TPU’da GCS kullan
