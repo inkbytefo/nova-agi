@@ -38,10 +38,22 @@ def nova_loss(
         total_loss: Scalar loss.
         metrics: Dictionary of loss components.
     """
-    n = logits.shape[0]
+    # Determine shapes
+    vocab_size = logits.shape[-1]
+    # Handle batched input (B, N, D) or single (N, D)
+    if logits.ndim == 3:
+        b, n, _ = logits.shape
+        is_batched = True
+    else:
+        n = logits.shape[0]
+        b = 1
+        is_batched = False
     
     if mask is None:
-        mask = jnp.ones((n,), dtype=jnp.float32)
+        if is_batched:
+            mask = jnp.ones((b, n), dtype=jnp.float32)
+        else:
+            mask = jnp.ones((n,), dtype=jnp.float32)
         
     # Ensure mask is binary (0.0 or 1.0)
     mask = (mask > 0.5).astype(jnp.float32)
@@ -52,36 +64,41 @@ def nova_loss(
     task_loss = (ce * mask).sum() / valid_count
     
     # 2. Diversity Loss (Maximizing Dissimilarity)
-    # We want embeddings to be diverse, i.e., low cosine similarity off-diagonal.
-    # sim matrix: (n, n)
-    # Normalize embeddings first for true cosine similarity? 
-    # The user's snippet used: sim = jnp.clip(embeddings @ embeddings.T, -1.0, 1.0)
-    # Assuming embeddings are already normalized or we accept dot product.
-    # But let's normalize to be safe and standard for "similarity".
-    norm_embeddings = embeddings / (jnp.linalg.norm(embeddings, axis=1, keepdims=True) + 1e-7)
-    sim = jnp.clip(norm_embeddings @ norm_embeddings.T, -1.0, 1.0)
+    # Normalize embeddings along feature dim (last axis)
+    norm_embeddings = embeddings / (jnp.linalg.norm(embeddings, axis=-1, keepdims=True) + 1e-7)
+    
+    # Compute similarity matrix
+    # If batched: (B, N, D) @ (B, D, N) -> (B, N, N)
+    # If single: (N, D) @ (D, N) -> (N, N)
+    sim = jnp.matmul(norm_embeddings, jnp.swapaxes(norm_embeddings, -1, -2))
+    sim = jnp.clip(sim, -1.0, 1.0)
     
     # Mask matrix for valid pairs
-    mask_mat = mask[:, None] * mask[None, :]
+    # Expand dims for broadcasting mask multiplication
+    # mask: (B, N) or (N,)
+    mask_col = jnp.expand_dims(mask, axis=-1) # (..., N, 1)
+    mask_row = jnp.expand_dims(mask, axis=-2) # (..., 1, N)
+    mask_mat = mask_col * mask_row # (..., N, N)
     
     # Off-diagonal only
+    # Eye is (N, N). We broadcast to (B, N, N) if needed.
     eye_mask = 1.0 - jnp.eye(n)
+    if is_batched:
+        # Expand eye to (1, N, N) so it broadcasts to (B, N, N)
+        eye_mask = jnp.expand_dims(eye_mask, axis=0)
+
     off_diag_sim = sim * eye_mask * mask_mat
     off_diag_mask = eye_mask * mask_mat
     
     # Average similarity of valid off-diagonal pairs
-    # Count of valid pairs: sum(off_diag_mask)
+    # Count of valid pairs across everything
     pair_count = off_diag_mask.sum() + 1e-8
     mean_sim = off_diag_sim.sum() / pair_count
     
     # Diversity Score (Higher is better)
-    # We want low similarity.
-    # diversity_score = 1.0 - mean_sim
     diversity_score = 1.0 - mean_sim
     
     # Total Loss
-    # We subtract diversity_score to maximize it.
-    # total = task - beta * diversity
     total_loss = task_loss - beta * diversity_score
     
     return total_loss, {"task_loss": task_loss, "diversity_score": diversity_score, "mean_sim": mean_sim}
