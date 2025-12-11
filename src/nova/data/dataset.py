@@ -7,10 +7,59 @@ import numpy as np
 from typing import List, Tuple, Dict, Iterator
 from jaxtyping import Float, Array
 import chex
+from datasets import load_dataset, interleave_datasets, concatenate_datasets
+
+def load_turkish_corpus(
+    config: Dict,
+    split: str = "train",
+    streaming: bool = True
+):
+    """
+    Loads and mixes modern Turkish datasets (Cosmos, BellaTurca) based on config.
+    Handles manual validation splitting for datasets without it.
+    """
+    sources = config.get("corpus_sources", {})
+    datasets_list = []
+    probabilities = []
+    
+    for key, source_cfg in sources.items():
+        path = source_cfg.get("path")
+        weight = source_cfg.get("weight", 1.0)
+        
+        try:
+            # Try loading specific split, else fallback to 'train'
+            # For Cosmos/BellaTurca, we likely only have 'train'
+            ds = load_dataset(path, split="train", streaming=streaming)
+            
+            # Validation Logic:
+            # If split is 'validation', we skip the first N samples.
+            # If split is 'train', we take from N onwards (or just mix if we ignore overlap for now)
+            # ideally we skip first 1000 for validation
+            val_size = 1000
+            
+            if split == "validation":
+                ds = ds.take(val_size)
+            else:
+                ds = ds.skip(val_size)
+                
+            datasets_list.append(ds)
+            probabilities.append(weight)
+            print(f"Loaded {key} ({path}) for split {split}")
+        except Exception as e:
+            print(f"Failed to load {key}: {e}")
+            
+    if not datasets_list:
+        raise ValueError("No datasets loaded successfully!")
+        
+    # Normalize probabilities
+    total = sum(probabilities)
+    probabilities = [p/total for p in probabilities]
+    
+    mixed_ds = interleave_datasets(datasets_list, probabilities=probabilities, seed=42)
+    return mixed_ds
 
 def generate_synthetic_data(
     num_samples: int,
-    min_nodes: int = 10,
     max_nodes: int = 20,
     min_edges: int = 5,
     max_edges: int = 15,

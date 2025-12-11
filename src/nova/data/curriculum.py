@@ -35,11 +35,11 @@ class CurriculumLoader:
         # Default Dataset Configurations
         if datasets_config is None:
             self.datasets_config = {
-                "corpus": "ytu-ce-cosmos/Cosmos-Turkish-Corpus-v1.0",
-                "code": "bigcode/the-stack-smol",
-                "instruct": "Turkcell/InstrucTurca", # Updated
-                "cot": "GoktugP/Turkish-GSM8K-CoT", # Updated
-                "fallback": "allenai/mc4" # Fallback
+                # New Sources
+                "instruct": "AlicanKiraz0/Turkish-SFT-Dataset-v1.0", 
+                "cot": "GoktugP/Turkish-GSM8K-CoT",
+                "code": "codeparrot/github-code-clean",
+                # Note: 'corpus' is now handled by load_turkish_corpus in dataset.py via config
             }
         else:
             self.datasets_config = datasets_config
@@ -76,8 +76,22 @@ class CurriculumLoader:
 
         # Corpus
         # We skip the first 2048 samples to avoid overlap with validation set (if it uses train subset)
+        # Corpus
+        # Use the specialized loader from dataset.py to mix Cosmos/BellaTurca
+        from nova.data.dataset import load_turkish_corpus
+        
+        # We need to construct a mini-config for the corpus loader
+        # Ideally this comes from the main clean config, but we mock it here if needed
+        # or we assume self.datasets_config might have it if passed properly
+        corpus_config = {
+             "corpus_sources": {
+                 "cosmos": {"path": "ytu-ce-cosmos/Cosmos-Turkish-Corpus-v1.0", "weight": 0.5},
+                 "bellaturca": {"path": "turkish-nlp-suite/BellaTurca", "weight": 0.5},
+             }
+        }
+        
         try_load("corpus", 
-                 lambda: load_dataset(self.datasets_config["corpus"], split="train", streaming=True).skip(2048).map(self._extract_corpus),
+                 lambda: load_turkish_corpus(corpus_config, split="train", streaming=True).map(self._extract_corpus),
                  self.ratios.get("corpus", 0.0))
         
         # Code

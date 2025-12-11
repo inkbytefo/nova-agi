@@ -145,6 +145,7 @@ class Trainer:
 
     @staticmethod
     def _eval_logic(state, x, H, y, mask, alpha, beta):
+        logits, embeddings = state.apply_fn({'params': state.params}, x, H, train=False)
         loss, metrics = nova_loss(
             state.params, logits, y, embeddings, mask=mask, alpha=alpha, beta=beta
         )
