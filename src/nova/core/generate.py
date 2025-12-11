@@ -107,7 +107,8 @@ def append_token(H, x, new_token_id):
     
     def case_n0():
         # n=0 -> 1 node. Return (1, 1) global edge.
-        return jnp.ones((1, 1), dtype=H.dtype)
+        # Return new_H and new_x
+        return jnp.ones((1, 1), dtype=H.dtype), new_x
 
     def case_n_gt_0():
         # H is (n, m). Pad to (n+1, m).
@@ -169,7 +170,8 @@ def append_token(H, x, new_token_id):
         new_cols_concat = jnp.concatenate(cols_to_add, axis=1)
         
         # Concatenate with padded old H
-        return jnp.concatenate([H_padded, new_cols_concat], axis=1)
+        # Return new_H and new_x
+        return jnp.concatenate([H_padded, new_cols_concat], axis=1), new_x
 
     if n == 0:
         return case_n0()
