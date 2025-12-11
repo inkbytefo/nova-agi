@@ -1,3 +1,6 @@
+## Developer: inkbytefo
+## Modified: 2025-12-11
+
 # NovaNet Training Guide on Cloud TPU VM (v3-8)
 
 This guide outlines the steps to train NovaNet on the Turkish C4 dataset using a TPU v3-8 environment.
@@ -41,7 +44,8 @@ The TPU configuration is located at `configs/tpu_v3_8.yaml`.
 Key settings:
 *   **Batch Size:** 1024 (Global) - Optimized for 8 cores (128/core).
 *   **Model:** 8 Layers, 512 Hidden Dim.
-*   **Dataset:** `c4_tr` (Streaming).
+*   **Dataset:** `c4_tr` (Streaming) with `dataset.mode: curriculum`.
+*   **Sequence Length:** `max_seq_len: 128`.
 
 To modify, edit `configs/tpu_v3_8.yaml` using `nano` or `vim`.
 
@@ -53,8 +57,15 @@ Start the training using the TPU config:
 # Login to WandB (Optional, if monitoring is enabled)
 wandb login
 
-# Run Training
-python scripts/train.py --config-name tpu_v3_8
+# Run Training (Curriculum Mode)
+python scripts/train.py --config-name tpu_v3_8 dataset.mode=curriculum
+
+# Verify TPU devices recognized (optional)
+python - <<'PY'
+import jax
+print('Devices:', jax.devices())
+print('Local count:', jax.local_device_count())
+PY
 ```
 
 ### Monitoring
@@ -75,3 +86,14 @@ This will load the latest checkpoint from `checkpoints/` and start an interactiv
 *   **OOM (Out of Memory):** Reduce `batch_size` or `hidden_dim` in `configs/tpu_v3_8.yaml`.
 *   **Slow Startup:** JAX compilation can take a few minutes for the first step. This is normal.
 *   **NaN Loss:** Try reducing `lr` (Learning Rate).
+*   **No TPU devices:** Ensure `pip install "jax[tpu]"` completed and you are running on a TPU VM.
+*   **HF Streaming Errors:** Datasets can occasionally rate-limit. Retry or ensure VM has outbound internet.
+
+## 7. Curriculum Phases
+
+NovaNet uses a phased curriculum with dynamic dataset mixing:
+*   **Phase 0 (0–15k steps):** Turkish Corpus 70%, Python Code 30%
+*   **Phase 1 (15k–30k steps):** Turkish Corpus 40%, Python Code 30%, Turkish Instructions 30%
+*   **Phase 2 (30k–45k steps):** Turkish CoT 40% (fallback: Turkish-Alpaca), Complex Code 40%, Turkish Corpus 20%
+
+Phase changes are detected inside the training loop and logged to console/WandB.

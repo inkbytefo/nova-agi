@@ -1,3 +1,6 @@
+## Developer: inkbytefo
+## Modified: 2025-12-11
+
 # Nova: Thermodynamic Hypergraph AGI (Turkish C4 & TPU Edition)
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
@@ -56,6 +59,9 @@ python scripts/train.py
 
 # TPU Training (Optimized for v3-8)
 python scripts/train.py --config-name tpu_v3_8
+
+# Curriculum Mode (dynamic multi-dataset mixing)
+python scripts/train.py --config-name tpu_v3_8 dataset.mode=curriculum
 ```
 
 See [TRAINING_GUIDE.md](TRAINING_GUIDE.md) for detailed TPU setup instructions.
@@ -76,7 +82,7 @@ python scripts/generate.py --config-name tpu_v3_8
 
 Nova uses [Hydra](https://hydra.cc/) for configuration management.
 *   `configs/config.yaml`: Default local settings.
-*   `configs/tpu_v3_8.yaml`: High-performance TPU settings.
+*   `configs/tpu_v3_8.yaml`: High-performance TPU settings (includes `dataset.mode: curriculum`).
 
 Override parameters via CLI:
 ```bash
