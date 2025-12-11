@@ -75,8 +75,9 @@ class CurriculumLoader:
                 logger.warning(f"Failed to load {key}: {e}")
 
         # Corpus
+        # We skip the first 2048 samples to avoid overlap with validation set (if it uses train subset)
         try_load("corpus", 
-                 lambda: load_dataset(self.datasets_config["corpus"], split="train", streaming=True).map(self._extract_corpus),
+                 lambda: load_dataset(self.datasets_config["corpus"], split="train", streaming=True).skip(2048).map(self._extract_corpus),
                  self.ratios.get("corpus", 0.0))
         
         # Code

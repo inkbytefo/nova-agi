@@ -58,8 +58,18 @@ class TurkishTextStream:
         try:
             self.dataset = load_dataset(dataset_name, split=split, streaming=True)
         except Exception as e:
-            print(f"Warning: Failed to load dataset {dataset_name} (split={split}): {e}")
-            self.dataset = []
+            if split == "validation":
+                print(f"Warning: 'validation' split not found for {dataset_name}. Using first 2048 samples of 'train' as validation.")
+                try:
+                    # Fallback: use a subset of train for validation
+                    ds = load_dataset(dataset_name, split="train", streaming=True)
+                    self.dataset = ds.take(2048)
+                except Exception as e2:
+                    print(f"Error: Failed to load fallback validation data: {e2}")
+                    self.dataset = []
+            else:
+                print(f"Warning: Failed to load dataset {dataset_name} (split={split}): {e}")
+                self.dataset = []
 
     def __iter__(self) -> Iterator[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
         for example in self.dataset:
