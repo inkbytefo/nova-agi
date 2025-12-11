@@ -60,6 +60,8 @@ wandb login
 # Run Training (Curriculum Mode)
 python scripts/train.py --config-name tpu_v3_8 dataset.mode=curriculum
 
+nohup python scripts/train.py --config-name tpu_v3_8 dataset=turkish_v2 use_wandb=true > train.log 2>&1 &
+
 # Verify TPU devices recognized (optional)
 python - <<'PY'
 import jax
