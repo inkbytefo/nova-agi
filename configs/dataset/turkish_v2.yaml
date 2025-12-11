@@ -24,5 +24,11 @@ code_sources:
     path: "bigcode/the-stack-smol"
     weight: 1.0
 
+# CoT Data (Reasoning Phase)
+cot_sources:
+  gsm8k_tr:
+    path: "bezir/gsm8k-tr"
+    weight: 1.0
+
 max_seq_len: 128
 num_samples: 1000000 # Virtual size for progress bars
