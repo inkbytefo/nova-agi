@@ -58,40 +58,18 @@ class HypergraphLayer(nn.Module):
         # 3. Attention Mechanism (Optional)
         attn_weights = None
         if self.use_attention:
-            # To compute attention, we need a preliminary aggregation
-            # This is a design choice: compute attention based on "raw" aggregation of x_trans
-            # Simple approach: e_raw = H^T @ x_trans
-            # Then score = W_attn(e_raw)
-            # Then softmax over incidence structure?
-            # For simplicity and standard HGNN attention:
-            # We often learn dynamic edge weights.
-            
-            # Let's aggregate first to get rough edge profile
-            # We use a simple sum or mean for the attention signal
             H_T = jnp.swapaxes(H, -1, -2)
-            e_raw = jnp.matmul(H_T, x_trans) # (..., m, features)
-            
-            # W_attn: Project to scalar score
-            # Shape: (..., m, 1)
-            attn_scores = nn.Dense(1, name='W_attn')(e_raw)
-            
-            # Apply Sigmoid to get a gating factor between 0 and 1
-            # Or we can do something more complex. 
-            # The prompt says "project edge features to a scalar and apply softmax (or sigmoid)"
-            # Since these are weights for the incidence matrix, they should probably be per-edge scalars.
-            # We broadcast these scores back to the H structure?
-            # Or is this attention *within* the aggregation (node-to-edge)?
-            # "Attention Mechanism for hyperedges" usually means weighting hyperedges.
-            # We will assume it re-weights the columns of H.
-            
-            edge_gates = nn.sigmoid(attn_scores) # (..., m, 1)
-            
-            # We modulate H by these gates. 
-            # H_attn = H * gates^T (broadcasting)
-            # H is (n, m), gates is (m, 1). We need (1, m)
-            # Use swapaxes for batch support
-            edge_gates_T = jnp.swapaxes(edge_gates, -1, -2) # (..., 1, m)
-            attn_weights = H * edge_gates_T
+            e_raw = jnp.matmul(H_T, x_trans)
+            q = nn.Dense(self.features, name='attn_q')(x_trans)
+            k = nn.Dense(self.features, name='attn_k')(e_raw)
+            scale = jnp.sqrt(jnp.array(self.features, dtype=x_trans.dtype))
+            attn_logits = jnp.matmul(q, jnp.swapaxes(k, -1, -2)) / (scale + 1e-7)
+            mask = (H > 0).astype(x_trans.dtype)
+            neg_inf = jnp.finfo(x_trans.dtype).min
+            masked_logits = attn_logits * mask + (1.0 - mask) * neg_inf
+            exp_logits = jnp.exp(masked_logits - jnp.max(masked_logits, axis=-2, keepdims=True)) * mask
+            denom = jnp.sum(exp_logits, axis=-2, keepdims=True) + 1e-7
+            attn_weights = exp_logits / denom
             
         # 4. Core Convolution
         # Pass the transformed x and the edge update function

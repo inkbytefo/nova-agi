@@ -12,11 +12,12 @@ from nova.data.text_stream import text_to_hypergraph
 class CurriculumLoader:
     def __init__(
         self,
-        max_seq_len: int = 128,
+        max_seq_len: int = 512,
         cosmos_dataset: str = "ytu-ce-cosmos/Cosmos-Turkish-Corpus-v1.0",
         stack_dataset: str = "bigcode/the-stack-smol",
         alpaca_dataset: str = "TFLai/Turkish-Alpaca",
-        cot_dataset: str = "malhajar/gsm8k-tr",
+        cot_dataset: str = "berhaan/Turkish-gsm8k",
+        cot_config: str = "main",
     ):
         self.max_seq_len = max_seq_len
         self.tokenizer = AutoTokenizer.from_pretrained("dbmdz/bert-base-turkish-cased")
@@ -40,9 +41,15 @@ class CurriculumLoader:
             raise RuntimeError(f"Failed to load Turkish Instructions '{alpaca_dataset}': {e}")
 
         try:
+            self.sources["turkish_cot"] = load_dataset(cot_dataset, cot_config, split="train", streaming=True)
+        except Exception:
             self.sources["turkish_cot"] = load_dataset(cot_dataset, split="train", streaming=True)
-        except Exception as e:
-            raise RuntimeError(f"Failed to load Turkish CoT '{cot_dataset}': {e}")
+
+        # Optional English CoT fallback (not used unless explicitly weighted)
+        try:
+            self.sources["english_cot"] = load_dataset("openai/gsm8k", split="train", streaming=True)
+        except Exception:
+            pass
 
         for k, ds in self.sources.items():
             self.iterators[k] = iter(ds)
@@ -130,5 +137,21 @@ class CurriculumLoader:
                 s.append(f"Düşünce: {cot}")
             if ans:
                 s.append(f"Cevap: {ans}")
+            return "\n".join(s)
+        if source_key == "english_cot":
+            q = example.get("question") or ""
+            ans = example.get("answer") or ""
+            cot = ""
+            if isinstance(ans, str) and "####" in ans:
+                parts = ans.split("####")
+                cot = parts[0].strip()
+                ans = "####" + parts[1].strip() if len(parts) > 1 else ans
+            s = []
+            if q:
+                s.append(f"Soru (EN): {q}")
+            if cot:
+                s.append(f"Düşünce (EN): {cot}")
+            if ans:
+                s.append(f"Cevap (EN): {ans}")
             return "\n".join(s)
         return example.get("text", "")

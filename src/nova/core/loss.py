@@ -14,8 +14,8 @@ def thermodynamic_loss(
     targets: Array, # Can be Float or Int
     embeddings: Float[Array, "n d"],
     mask: Optional[Float[Array, "n"]] = None,
-    alpha: float = 1e-4,  # Energy weight
-    beta: float = 1e-2    # Entropy weight
+    alpha: float = 1e-4,
+    beta: float = 1e-3
 ) -> tuple[Float[Array, ""], dict]:
     """
     Computes the Thermodynamic Loss combining Task, Energy, and Entropy.

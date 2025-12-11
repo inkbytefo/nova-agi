@@ -68,7 +68,7 @@ def text_to_hypergraph(token_ids: List[int], max_seq_len: int) -> Tuple[np.ndarr
     return x, H, y
 
 class TurkishTextStream:
-    def __init__(self, max_seq_len: int = 128, split: str = "train"):
+    def __init__(self, max_seq_len: int = 512, split: str = "train"):
         """
         Streaming dataset for Turkish text using C4.
         
