@@ -57,19 +57,22 @@ def main(cfg: DictConfig):
         cfg.model.input_dim = 2
         OmegaConf.set_struct(cfg, True)
         print(f"Updated model input_dim to {cfg.model.input_dim} for ZINC data.")
-    elif dataset_cfg.name == "c4_tr":
+    elif dataset_cfg.name in ["c4_tr", "turkish_v2"]:
         mode = dataset_cfg.get("mode", "stream")
         if mode == "curriculum":
             print("Initializing Curriculum Learning stream...")
+            # Pass the raw config dict to CurriculumLoader so it sees the new 'sources'
+            dataset_dict = OmegaConf.to_container(dataset_cfg, resolve=True)
             train_data = CurriculumLoader(
-                max_seq_len=dataset_cfg.get("max_seq_len", 128)
+                max_seq_len=dataset_cfg.get("max_seq_len", 128),
+                datasets_config=dataset_dict # Pass full config to handle custom sources
             )
             val_data = TurkishTextStream(
                 max_seq_len=dataset_cfg.get("max_seq_len", 128),
                 split="validation"
             )
         else:
-            print("Loading C4 Turkish Streaming data...")
+            print(f"Loading {dataset_cfg.name} Streaming data...")
             train_data = TurkishTextStream(
                 max_seq_len=dataset_cfg.get("max_seq_len", 128),
                 split="train"
@@ -102,7 +105,7 @@ def main(cfg: DictConfig):
         )
     
     # Simple split
-    if dataset_cfg.name != "c4_tr":
+    if dataset_cfg.name not in ["c4_tr", "turkish_v2"]:
         # Simple split
         split_idx = int(len(full_data) * 0.8)
         train_data = full_data[:split_idx]
