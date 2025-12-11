@@ -1,35 +1,52 @@
-# Modern Turkish Dataset Configuration v2
 name: "turkish_v2"
-mode: "curriculum" 
+mode: "curriculum"
 
-# Mixing weights for the 'corpus' phase
+# Ana eğitim kaynakları (train)
 corpus_sources:
-  cosmos: 
+  cosmos:
     path: "ytu-ce-cosmos/Cosmos-Turkish-Corpus-v1.0"
     weight: 0.5
   bellaturca:
     path: "turkish-nlp-suite/BellaTurca"
     config_name: "OzenliDerlem"
+    # <-- dikkat: config_name tırnak içinde
     weight: 0.5
 
-# Instruction Tuning Data
 instruction_sources:
   sft_v1:
     path: "AlicanKiraz0/Turkish-SFT-Dataset-v1.0"
     weight: 1.0
 
-# Code Data
 code_sources:
   python_code:
     path: "bigcode/the-stack-smol"
     weight: 1.0
 
-# CoT Data (Reasoning Phase)
 cot_sources:
   gsm8k_tr:
     path: "bezir/gsm8k-tr"
     split: "test"
     weight: 1.0
 
+# YENİ: Profesyonel validation setleri
+validation_sets:
+  - name: "tr_wikipedia_sample"
+    path: "mc4"
+    languages: ["tr"]
+    size: 10000                     # 10k örnek
+    split_ratio: 0.001              # mc4’ten %0.1 çekiyoruz, hızlı ve sabit seed
+    seed: 42
+
+  - name: "open_subtitles_tr"
+    path: "open_subtitles"
+    languages: ["tr"]
+    size: 5000
+
+  - name: "turkish_news"
+    path: "oscar"
+    config_name: "unshuffled_deduplicated_tr"
+    size: 5000
+    split_ratio: 0.0005
+
 max_seq_len: 2048
-num_samples: 1000000 # Virtual size for progress bars
+num_samples: 100000000   # train için sanal büyük sayı

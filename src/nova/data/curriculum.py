@@ -4,6 +4,7 @@ from datasets import interleave_datasets, load_dataset
 from nova.data.tokenizer import HypergraphTokenizer
 from nova.data.text_stream import text_to_hypergraph
 import logging
+import random
 
 logger = logging.getLogger(__name__)
 
@@ -70,3 +71,37 @@ class CurriculumLoader:
             x, H, y = text_to_hypergraph(ids, self.max_seq_len)
             if len(x) > 10:  # çok kısa olanları at
                 yield x.astype(np.int32), H.astype(np.float32), y.astype(np.int32)
+
+def build_validation_loader(max_seq_len: int = 2048):
+    """Profesyonel, sabit validation seti döndürür (her run’da aynı)."""
+    tokenizer = HypergraphTokenizer(vocab_size=5000)
+    val_examples = []
+
+    # 1. Wikipedia TR
+    ds = load_dataset("mc4", "tr", split=f"train[:1%]", seed=42)
+    val_examples.extend(ds.select(range(10000)))
+
+    # 2. OpenSubtitles TR
+    ds = load_dataset("open_subtitles", "tr", split="train", verification_mode="no_checks")
+    val_examples.extend(ds.select(range(min(5000, len(ds)))))
+
+    # 3. OSCAR TR
+    ds = load_dataset("oscar", "unshuffled_deduplicated_tr", split="train")
+    val_examples.extend(ds.select(range(min(5000, len(ds)))))
+
+    random.seed(42)
+    random.shuffle(val_examples)
+    val_examples = val_examples[:10000]   # toplam 10k sabit validation
+
+    class ValidationSet:
+        def __iter__(self):
+            for example in val_examples:
+                text = example.get("text") or example.get("content") or ""
+                if len(text) < 50: continue
+                encoded = tokenizer(text, max_length=max_seq_len, padding="max_length", return_tensors="np")
+                ids = encoded["input_ids"][0].tolist()
+                x, H, y = text_to_hypergraph(ids, max_seq_len)
+                if len(x) > 100:
+                    yield x.astype(np.int32), H.astype(np.float32), y.astype(np.int32)
+    
+    return ValidationSet()

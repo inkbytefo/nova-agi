@@ -19,7 +19,7 @@ from nova.core.loss import nova_loss
 from nova.data.dataset import get_dataloader, get_streaming_dataloader
 from nova.core.topology import update_topology
 from nova.core.generate import generate_text
-from nova.data.curriculum import CurriculumLoader
+from nova.data.curriculum import CurriculumLoader, build_validation_loader
 
 class TrainState(train_state.TrainState):
     # Add any extra state if needed, for now standard is fine
@@ -64,7 +64,11 @@ class Trainer:
             print(f"Warning: Could not load tokenizer: {e}")
             self.tokenizer = None
             
-        self.val_prompts = ["Yapay zeka", "Türkiye'nin başkenti", "Bilim ve teknoloji", "Merhaba dünya"]
+        self.val_prompts = ["Türkiye", "Yapay zeka", "İstanbul", "Merhaba, nasılsın"]
+        
+        # YENİ: profesyonel validation iterator
+        self.val_data = build_validation_loader(max_seq_len=self.config["training"].get("max_seq_len", 2048))
+        print(f"Professional validation loader ready – {10000} fixed examples")
 
     def create_train_state(self, rng, sample_x, sample_H):
         """Initializes the model and optimizer."""
@@ -164,6 +168,10 @@ class Trainer:
 
     def fit(self, train_data, val_data):
         """Main training loop."""
+        # Override val_data if we have a professional one loaded
+        if hasattr(self, "val_data") and self.val_data is not None:
+            val_data = self.val_data
+
         rng = jax.random.PRNGKey(self.config["training"]["seed"])
         rng, init_rng = jax.random.split(rng)
         
