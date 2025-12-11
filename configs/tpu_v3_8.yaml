@@ -1,4 +1,8 @@
 # TPU v3-8 Configuration for NovaNet on Turkish C4
+defaults:
+  - _self_
+  - dataset: c4_tr # Default, but overridable
+
 model:
   hidden_dim: 512
   layers: 8
