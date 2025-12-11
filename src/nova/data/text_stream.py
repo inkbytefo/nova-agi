@@ -81,22 +81,23 @@ class TurkishTextStream:
 
     @staticmethod
     def _load_tr_stream(split: str):
-        paths = [
-            f"hf://datasets/allenai/c4@refs/convert/parquet/tr/{split}/*.parquet",
-            f"hf://datasets/mc4@refs/convert/parquet/tr/{split}/*.parquet",
-        ]
-        for p in paths:
-            try:
-                return load_dataset(
-                    "parquet",
-                    data_files=p,
-                    split=split,
-                    streaming=True,
-                    columns=["text"],
-                )
-            except Exception:
-                continue
-        raise RuntimeError("Turkish C4/mC4 parquet dataset could not be loaded")
+        try:
+            return load_dataset("allenai/c4", "tr", split=split, streaming=True)
+        except Exception:
+            pass
+        try:
+            return load_dataset("mc4", "tr", split=split, streaming=True)
+        except Exception:
+            pass
+        try:
+            return load_dataset("ytu-ce-cosmos/Cosmos-Turkish-Corpus-v1.0", split=split, streaming=True)
+        except Exception:
+            pass
+        try:
+            return load_dataset("lumees/turkish-corpus-100b", split=split, streaming=True)
+        except Exception:
+            pass
+        raise RuntimeError("Turkish datasets could not be loaded (C4/mC4/Cosmos)")
         
     def __iter__(self) -> Iterator[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
         """
