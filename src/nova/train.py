@@ -144,7 +144,7 @@ class Trainer:
         return state, metrics
 
     @staticmethod
-    @partial(jax.pmap, axis_name='batch', in_axes=(0, 0, 0, 0, 0, None, None, 0, None), static_argnums=(8,))
+    @partial(jax.pmap, axis_name='batch', in_axes=(0, 0, 0, 0, 0, None, None, 0, None), static_broadcasted_argnums=(8,))
     def _train_step_pmap(state, x, H, y, mask, alpha, beta, dropout_key, refine_topology: bool = False):
         grads, metrics = Trainer._train_logic(
             state, x, H, y, mask, alpha, beta, dropout_key, refine_topology
