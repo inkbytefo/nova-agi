@@ -51,14 +51,14 @@ class TurkishTextStream:
     """
     Streaming dataset loader for Turkish text corpora.
     """
-    def __init__(self, dataset_name: str = "ytu-ce-cosmos/Cosmos-Turkish-Corpus-v1.0", max_seq_len: int = 512):
+    def __init__(self, dataset_name: str = "ytu-ce-cosmos/Cosmos-Turkish-Corpus-v1.0", max_seq_len: int = 512, split: str = "train"):
         self.max_seq_len = max_seq_len
         self.tokenizer = AutoTokenizer.from_pretrained("dbmdz/bert-base-turkish-cased")
         
         try:
-            self.dataset = load_dataset(dataset_name, split="train", streaming=True)
+            self.dataset = load_dataset(dataset_name, split=split, streaming=True)
         except Exception as e:
-            print(f"Warning: Failed to load dataset {dataset_name}: {e}")
+            print(f"Warning: Failed to load dataset {dataset_name} (split={split}): {e}")
             self.dataset = []
 
     def __iter__(self) -> Iterator[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
