@@ -29,27 +29,33 @@ def update_topology(
     Returns:
         H_new: Updated incidence matrix.
     """
-    chex.assert_rank(H, 2)
-    chex.assert_rank(embeddings, 2)
+    # Relax rank check to allow batches (Rank 3)
+    # chex.assert_rank(H, 2)
+    # chex.assert_rank(embeddings, 2)
     
     # Normalize embeddings
-    norm_embeddings = embeddings / (jnp.linalg.norm(embeddings, axis=1, keepdims=True) + 1e-7)
+    # embeddings shape: (..., n, d)
+    # Norm along the last dimension (d)
+    norm_embeddings = embeddings / (jnp.linalg.norm(embeddings, axis=-1, keepdims=True) + 1e-7)
     
     # Compute similarity with the AVERAGE embedding (Global Context)
-    # This captures the global topic/context better than just the last token.
-    avg_emb = jnp.mean(norm_embeddings, axis=0)
-    avg_emb = avg_emb / (jnp.linalg.norm(avg_emb) + 1e-7)
+    # Average over nodes (axis=-2)
+    # avg_emb shape: (..., d)
+    avg_emb = jnp.mean(norm_embeddings, axis=-2)
+    avg_emb = avg_emb / (jnp.linalg.norm(avg_emb, axis=-1, keepdims=True) + 1e-7)
     
-    # sim[i] = dot(emb[i], avg_emb)
-    # Shape: (n,)
-    sim_to_global = jnp.dot(norm_embeddings, avg_emb)
+    # Compute similarity
+    # norm_embeddings: (..., n, d)
+    # avg_emb: (..., d)
+    # We want dot product along d, resulting in (..., n)
+    # Expand avg_emb to (..., 1, d) for broadcasting
+    sim_to_global = jnp.sum(norm_embeddings * jnp.expand_dims(avg_emb, axis=-2), axis=-1)
     
     # Thresholding
-    # 1.0 if sim > threshold, else 0.0
     new_global_col = (sim_to_global > threshold).astype(H.dtype)
     
     # Update only the last column of H
-    # H is (n, m). Last column is H[:, -1]
-    H_new = H.at[:, -1].set(new_global_col)
+    # H is (..., n, m). Last column is H[..., -1]
+    H_new = H.at[..., -1].set(new_global_col)
     
     return H_new
