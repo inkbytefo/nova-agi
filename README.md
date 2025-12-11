@@ -1,61 +1,110 @@
-# Nova: Thermodynamic Hypergraph AGI
+# Nova: Thermodynamic Hypergraph AGI (Turkish C4 & TPU Edition)
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
-![Python 3.10](https://img.shields.io/badge/python-3.10-blue.svg)
-![JAX](https://img.shields.io/badge/JAX-Accelerated-green.svg)
+![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)
+![JAX](https://img.shields.io/badge/JAX-TPU%20Optimized-green.svg)
+![Status](https://img.shields.io/badge/Status-Research-orange.svg)
 
-## Abstract
+**Nova** is an experimental AGI research framework that models cognition as a thermodynamic process on a dynamic hypergraph topology. It integrates **Friston’s Free Energy Principle** with **Geometric Deep Learning** to create self-organizing neural structures.
 
-**Nova** is an experimental AGI research framework that integrates **Friston’s Free Energy Principle** with **Dynamic Hypergraph Architectures**. By modeling cognition as a thermodynamic process on a changing topology, Nova attempts to minimize variational free energy not just through parameter updates, but through structural evolution of the compute graph itself.
+This repository is currently focused on training **NovaNet** on the **Turkish C4 (Colossal Clean Crawled Corpus)** dataset using **Google Cloud TPUs**.
 
-Key innovations:
-- **Thermodynamic Loss**: Optimizes for energy efficiency alongside accuracy.
-- **Dynamic Topology**: The neural graph structure evolves during training (edges are added/pruned based on information flow).
+## 🚀 Key Features
 
-## Quick Start
+*   **Dynamic Hypergraph Topology**: Nodes represent tokens, edges represent sequential, local (window), and global (sentence) context.
+*   **Thermodynamic Loss**: Minimizes variational free energy (Accuracy + Energy Efficiency).
+*   **Streaming Data Pipeline**: Efficiently streams terabytes of text data (C4 Turkish) without loading into RAM.
+*   **Autoregressive Generation**: Supports text generation via hypergraph reconstruction.
+*   **TPU Optimization**: Fully compatible with JAX `pmap` for multi-core TPU v3-8 training.
 
-### Installation
+---
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/your-username/nova.git
-   cd nova
-   ```
+## 🛠️ Installation
 
-2. Install dependencies:
-   ```bash
-   pip install -r nova_agi/requirements.txt
-   ```
+### Prerequisites
+*   Python 3.10+
+*   JAX (with TPU or CUDA support)
 
-### Training
+### Setup
 
-To train NovaNet on synthetic hypergraphs or the ZINC dataset:
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/inkbytefo/nova-agi.git
+    cd nova-agi
+    ```
+
+2.  **Install Dependencies:**
+    ```bash
+    # Standard installation
+    pip install -r requirements.txt
+
+    # For TPU usage, ensure you have the correct JAX version:
+    # pip install "jax[tpu]" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+    ```
+
+---
+
+## 🏃 Usage
+
+### 1. Training (Turkish C4)
+
+To train the model on the Turkish C4 dataset using the default configuration (or TPU config):
 
 ```bash
-# Run with default configuration (Synthetic Data)
-python nova_agi/scripts/train.py
+# Local Training (CPU/GPU)
+python scripts/train.py
 
-# Run with ZINC dataset
-python nova_agi/scripts/train.py dataset=zinc
+# TPU Training (Optimized for v3-8)
+python scripts/train.py --config-name tpu_v3_8
 ```
 
-## Architecture
+See [TRAINING_GUIDE.md](TRAINING_GUIDE.md) for detailed TPU setup instructions.
 
-NovaNet processes data through a dynamic hypergraph message-passing mechanism.
+### 2. Text Generation (Inference)
 
-```mermaid
-graph TD
-    A[Input Data] --> B[Hypergraph Construction];
-    B --> C{Message Passing Layer};
-    C -->|Update States| D[Node Embeddings];
-    C -->|Calculate Energy| E[Thermodynamic Loss];
-    D --> F[Topology Update];
-    F -->|Prune/Add Edges| C;
-    D --> G[Readout / Classification];
-    E --> H[Total Loss Minimization];
-    G --> H;
+You can generate text interactively using a trained checkpoint:
+
+```bash
+# Interactive Mode
+python scripts/generate.py
+
+# Specify a config or checkpoint directory
+python scripts/generate.py --config-name tpu_v3_8
 ```
 
-## License
+### 3. Configuration
 
-This project is licensed under the MIT License.
+Nova uses [Hydra](https://hydra.cc/) for configuration management.
+*   `configs/config.yaml`: Default local settings.
+*   `configs/tpu_v3_8.yaml`: High-performance TPU settings.
+
+Override parameters via CLI:
+```bash
+python scripts/train.py training.batch_size=32 model.hidden_dim=256
+```
+
+---
+
+## 🧠 Architecture
+
+NovaNet processes text not as a flat sequence, but as a **Hypergraph**:
+
+1.  **Tokenization**: Text -> Token IDs (BERT Turkish).
+2.  **Graph Construction**:
+    *   **Nodes**: Tokens.
+    *   **Edges**:
+        *   *Sequential*: $t_i \leftrightarrow t_{i+1}$
+        *   *Context*: $t_i \leftrightarrow t_{i+1} \leftrightarrow t_{i+2}$
+        *   *Global*: All tokens in a sentence connected by one hyperedge.
+3.  **Message Passing**: Hypergraph Convolution (Gather -> Update -> Scatter).
+4.  **Prediction**: Predicts next token minimizing Cross-Entropy (Information Surprise) + Energy Cost.
+
+---
+
+## 🤝 Contributing
+
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## 📄 License
+
+MIT License. See `LICENSE` for details.
