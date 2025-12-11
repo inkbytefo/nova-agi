@@ -74,43 +74,51 @@ class CurriculumLoader:
                 yield x.astype(np.int32), H.astype(np.float32), y.astype(np.int32)
 
 def build_validation_loader(max_seq_len: int = 2048):
-    """Profesyonel, sabit validation seti döndürür (her run’da aynı)."""
     tokenizer = HypergraphTokenizer(vocab_size=5000)
-    datasets = []
-
-    # 1. Wikipedia TR
-    try:
-        ds1 = load_dataset("mc4", "tr", split="train", streaming=True).take(5000)
-        datasets.append(ds1)
-    except: pass
-
-    # 2. OpenSubtitles TR
-    try:
-        ds2 = load_dataset("open_subtitles", "tr", split="train", streaming=True).take(2500)
-        datasets.append(ds2)
-    except: pass
     
-    # 3. OSCAR TR
-    try:
-        ds3 = load_dataset("oscar", "unshuffled_deduplicated_tr", split="train", streaming=True).take(2500)
-        datasets.append(ds3)
-    except: pass
-
-    if not datasets:
-        logger.warning("No validation datasets loaded. Using dummy.")
-        return []
+    # 10k sabit, hızlı, tekrarlanabilir validation seti
+    val_sources = [
+        ("mc4", "tr", None, 4000),
+        ("oscar", "unshuffled_deduplicated_tr", None, 3000),
+        ("open_subtitles", None, "tr", 2000),
+        ("ytu-ce-cosmos/Cosmos-Turkish-Corpus-v1.0", None, None, 1000),
+    ]
     
-    combined_val = interleave_datasets(datasets, seed=42, stopping_strategy="all_exhausted")
-
-    class ValidationSet:
+    examples = []
+    print("Building fixed validation set...")
+    for path, config, lang, n in val_sources:
+        try:
+            if lang:
+                ds = load_dataset(path, lang, split="train", streaming=True)
+            elif config:
+                ds = load_dataset(path, config, split="train", streaming=True)
+            else:
+                ds = load_dataset(path, split="train", streaming=True)
+            
+            # Cache n examples in memory
+            current_examples = list(ds.take(n))
+            examples.extend(current_examples)
+            print(f"Loaded {len(current_examples)} from {path}")
+        except Exception as e:
+            logger.warning(f"Failed to load validation source {path}: {e}")
+            continue
+    
+    if not examples:
+        logger.warning("All validation sources failed. Creating dummy validation set.")
+        examples = [{"text": "merhaba dünya " * 10}] * 100
+        
+    print(f"Total validation size: {len(examples)}")
+    
+    class FixedVal:
         def __iter__(self):
-            for example in combined_val:
-                text = example.get("text") or example.get("content") or ""
-                if len(text) < 50: continue
-                encoded = tokenizer(text, max_length=max_seq_len, padding="max_length", return_tensors="np")
-                ids = encoded["input_ids"][0].tolist()
-                x, H, y = text_to_hypergraph(ids, max_seq_len)
-                if len(x) > 100:
-                    yield x.astype(np.int32), H.astype(np.float32), y.astype(np.int32)
+            for ex in examples:
+                text = ex.get("text") or ex.get("content") or ""
+                if len(text) > 50:
+                    encoded = tokenizer(text, max_length=max_seq_len, padding="max_length", return_tensors="np")
+                    ids = encoded["input_ids"][0].tolist()
+                    x, H, y = text_to_hypergraph(ids, max_seq_len)
+                    # Filter too short sequences (model crashes or useless)
+                    if len(x) > 10:
+                        yield x.astype(np.int32), H.astype(np.float32), y.astype(np.int32)
     
-    return ValidationSet()
+    return FixedVal()
