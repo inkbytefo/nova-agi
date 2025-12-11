@@ -35,16 +35,18 @@ def update_topology(
     # Normalize embeddings
     norm_embeddings = embeddings / (jnp.linalg.norm(embeddings, axis=1, keepdims=True) + 1e-7)
     
-    # Compute similarity with the LAST node only (current context)
-    # We don't need full n*n matrix if we only care about the last column.
-    # sim[i] = dot(emb[i], emb[-1])
+    # Compute similarity with the AVERAGE embedding (Global Context)
+    # This captures the global topic/context better than just the last token.
+    avg_emb = jnp.mean(norm_embeddings, axis=0)
+    avg_emb = avg_emb / (jnp.linalg.norm(avg_emb) + 1e-7)
+    
+    # sim[i] = dot(emb[i], avg_emb)
     # Shape: (n,)
-    last_emb = norm_embeddings[-1]
-    sim_to_last = jnp.dot(norm_embeddings, last_emb)
+    sim_to_global = jnp.dot(norm_embeddings, avg_emb)
     
     # Thresholding
     # 1.0 if sim > threshold, else 0.0
-    new_global_col = (sim_to_last > threshold).astype(H.dtype)
+    new_global_col = (sim_to_global > threshold).astype(H.dtype)
     
     # Update only the last column of H
     # H is (n, m). Last column is H[:, -1]

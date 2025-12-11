@@ -15,7 +15,7 @@ import time
 from transformers import AutoTokenizer
 
 from nova.models.nova import NovaNet
-from nova.core.loss import thermodynamic_loss
+from nova.core.loss import nova_loss
 from nova.data.dataset import get_dataloader, get_streaming_dataloader
 from nova.core.topology import update_topology
 from nova.core.generate import generate_text
@@ -111,7 +111,7 @@ class Trainer:
                 {'params': params}, x, H_used, train=True,
                 rngs={'dropout': dropout_key}
             )
-            loss, metrics = thermodynamic_loss(
+            loss, metrics = nova_loss(
                 params, logits, y, embeddings, mask=mask, alpha=alpha, beta=beta
             )
             return loss, metrics
@@ -146,7 +146,7 @@ class Trainer:
     @staticmethod
     def _eval_logic(state, x, H, y, mask, alpha, beta):
         logits, embeddings = state.apply_fn({'params': state.params}, x, H, train=False)
-        loss, metrics = thermodynamic_loss(
+        loss, metrics = nova_loss(
             state.params, logits, y, embeddings, mask=mask, alpha=alpha, beta=beta
         )
         return metrics
@@ -189,33 +189,8 @@ class Trainer:
         beta = self.config["training"]["beta"]   # Entropy weight
         
         # Topology update settings
-        topology_start_epoch = 5 # Wait for embeddings to stabilize
+        # Refine every 5 epochs
         
-        phases = [
-            {
-                "end_step": 15000,
-                "ratios": {
-                    "turkish_corpus": 0.7,
-                    "python_code": 0.3,
-                },
-            },
-            {
-                "end_step": 30000,
-                "ratios": {
-                    "turkish_corpus": 0.4,
-                    "python_code": 0.3,
-                    "turkish_instructions": 0.3,
-                },
-            },
-            {
-                "end_step": 45000,
-                "ratios": {
-                    "turkish_cot": 0.4,
-                    "python_code": 0.4,
-                    "turkish_corpus": 0.2,
-                },
-            },
-        ]
         current_phase_idx = -1
         global_step = 0
         
@@ -226,37 +201,51 @@ class Trainer:
             start_time = time.time()
             
             # Determine if we refine topology this epoch
-            refine_topology = epoch > topology_start_epoch
+            # User request: "topology refinement at epoch%5==0"
+            refine_topology = (epoch % 5 == 0)
             
-            # Training Loop
-            if is_streaming:
-                 steps_per_epoch = self.config["training"].get("steps_per_epoch", 1000)
-                 train_loader = get_streaming_dataloader(
-                     iter(train_data), batch_size, num_devices=self.num_devices
-                 )
+            # Curriculum Update
+            # Create new loader with current epoch to update ratios
+            if is_curriculum:
+                print(f"Epoch {epoch}: Updating CurriculumLoader...")
+                # We assume train_data was initialized with config compatible with re-init
+                # Since we don't have the original config here easily, we create a new one 
+                # OR we just instantiate it if we know the class.
+                # Ideally, we should pass the config to fit or store it.
+                # For now, we assume standard init parameters or rely on the fact that 
+                # the user creates the loader.
+                # BUT the user said: "train.py'ye ekle: Her epoch'ta yeni loader oluştur"
+                # So we must recreate it.
+                train_loader_instance = CurriculumLoader(epoch=epoch, max_seq_len=self.config["model"]["max_seq_len"])
+                
+                if is_streaming:
+                     steps_per_epoch = self.config["training"].get("steps_per_epoch", 1000)
+                     train_loader = get_streaming_dataloader(
+                         iter(train_loader_instance), batch_size, num_devices=self.num_devices
+                     )
+                else:
+                     # Fallback if curriculum is somehow not streaming (unlikely)
+                     train_loader = get_dataloader(
+                        train_loader_instance, batch_size, shuffle=True, seed=epoch, 
+                        drop_last=True, num_devices=self.num_devices
+                     )
             else:
-                 train_loader = get_dataloader(
-                    train_data, batch_size, shuffle=True, seed=epoch, 
-                    drop_last=True, num_devices=self.num_devices
-                 )
+                # Standard Data Loading
+                if is_streaming:
+                     steps_per_epoch = self.config["training"].get("steps_per_epoch", 1000)
+                     train_loader = get_streaming_dataloader(
+                         iter(train_data), batch_size, num_devices=self.num_devices
+                     )
+                else:
+                     train_loader = get_dataloader(
+                        train_data, batch_size, shuffle=True, seed=epoch, 
+                        drop_last=True, num_devices=self.num_devices
+                     )
             
             step_count = 0
             for x, H, y, mask in train_loader:
                 if is_streaming and step_count >= steps_per_epoch:
                     break
-                if is_curriculum:
-                    phase_idx = 0
-                    for i, ph in enumerate(phases):
-                        if global_step < ph["end_step"]:
-                            phase_idx = i
-                            break
-                    if phase_idx != current_phase_idx:
-                        current_phase_idx = phase_idx
-                        train_data.set_ratios(phases[phase_idx]["ratios"])
-                        msg = f"Phase Change -> {phase_idx} at step {global_step}"
-                        print(msg)
-                        if self.config.get("use_wandb", False):
-                            wandb.log({"phase/index": phase_idx, "phase/step": global_step})
                 
                 # Split RNG for dropout
                 rng, dropout_key = jax.random.split(rng)

@@ -26,47 +26,155 @@ def append_token(H, x, new_token_id):
     # Update x
     new_x = jnp.concatenate([x, jnp.array([new_token_id], dtype=x.dtype)])
     
+    # n=0 case (empty start -> 1 token)
+    # If n=0, we are creating the first token (or rather, second token if x has 1?).
+    # If x was empty (n=0), new_x has 1 token.
+    # We return H for 1 token. Just a global self-loop?
+    # User said: "n==0 için H = jnp.ones((1,1)) global olarak."
+    
+    # We can handle n=0 separately with jax.lax.cond or simple logic if not traced
+    # But since it's jitted, we use conditional logic or masks.
+    
+    # Logic for n > 0
+    
     # Create new columns for Sequential, Context, and Global edges
     # Shape (n+1, 3)
     new_cols = jnp.zeros((n + 1, 3), dtype=H.dtype)
     
     # 1. Sequential Edge (n-1, n)
-    if n > 0:
-        new_cols = new_cols.at[n-1, 0].set(1.0)
-    new_cols = new_cols.at[n, 0].set(1.0)
+    # If n=0 (1 node total), we don't have n-1. 
+    # If n>0 (2+ nodes total), we connect previous to current.
+    # Use where to avoid index -1
+    idx_prev = jnp.maximum(0, n - 1)
+    # Set 1.0 at idx_prev if n > 0
+    # JAX way:
+    new_cols = new_cols.at[idx_prev, 0].set(jnp.where(n > 0, 1.0, 0.0))
+    new_cols = new_cols.at[n, 0].set(jnp.where(n > 0, 1.0, 0.0)) # Only create seq edge if n > 0
     
     # 2. Context Edge (n-2, n-1, n)
-    if n >= 2:
-        new_cols = new_cols.at[n-2:n+1, 1].set(1.0)
-        
-    # 3. Global Edge (0..n)
-    # Always 1s column for the current scope
+    # If n >= 2 (3+ nodes total)
+    # Indices: n-2, n-1, n
+    start_ctx = jnp.maximum(0, n - 2)
+    # We can set range slice dynamically? No, slices must be static in JAX usually.
+    # But we can set specific indices.
+    # Since window is fixed size 3:
+    # We set at n, n-1, n-2 IF n >= 2.
+    # We use boolean mask for the column logic?
+    
+    # Or simpler:
+    # Just set them, but if n < 2, the edge is invalid (has < 3 nodes)?
+    # User wants "last 4 context". Here we add 1 context edge per step?
+    # Yes, sliding window adds 1 edge.
+    # If n < 2, we shouldn't add a context edge.
+    
+    # Let's use mask approach for columns
+    # Col 0 (Seq): Valid if n >= 1 (so total nodes >= 2)
+    # Col 1 (Ctx): Valid if n >= 2 (so total nodes >= 3)
+    # Col 2 (Global): Always valid.
+    
+    # Construct columns
+    # Seq
+    new_cols = new_cols.at[n, 0].set(1.0)
+    new_cols = new_cols.at[n-1, 0].set(1.0)
+    
+    # Ctx
+    new_cols = new_cols.at[n, 1].set(1.0)
+    new_cols = new_cols.at[n-1, 1].set(1.0)
+    new_cols = new_cols.at[n-2, 1].set(1.0)
+    
+    # Global
     new_cols = new_cols.at[:, 2].set(1.0)
     
-    # Pad existing H to (n+1, m)
-    # We pad the last row with 0s (new node not connected to old edges)
-    if n == 0:
-        # Initial state
-        new_H = new_cols[:, 2:] # Only global? Or seq/ctx too? 
-        # If n=0, we have 1 node (index 0). 
-        # Seq: [0]. Ctx: [0]? 
-        # User logic: "if n >= 2 ... ctx".
-        # "new_cols.at[n, 0].set(1.0)". Seq edge has node 0.
-        # But seq edge usually needs 2 nodes? [i, i+1].
-        # If n=0 (1 node), seq edge is just self-loop?
-        # User code `new_H = new_cols[:, 2:]` (only global) if n=0.
-        # Let's follow user code for n=0 case.
-        new_H = new_cols[:, 2:]
-    else:
+    # Mask invalid columns
+    # If n < 1, Seq col (0) should be 0s? Or removed?
+    # We can't change shape dynamically. We just zero it out effectively.
+    seq_valid = n >= 1
+    ctx_valid = n >= 2
+    
+    new_cols = new_cols.at[:, 0].multiply(seq_valid)
+    new_cols = new_cols.at[:, 1].multiply(ctx_valid)
+    
+    # If n=0, new_cols shape (1, 3).
+    # Seq col: 0. Ctx col: 0. Global: 1.
+    # But user wants H = jnp.ones((1,1)) if n=0.
+    # If we return (1, 3) with 2 zero columns, it's inefficient but works.
+    # But `generate` loop expects consistent growth?
+    # If we return (1, 1) now, next step n=1.
+    # Next step H will be (1, 1). Pad to (2, 1).
+    # Add new cols (2, 3). Result (2, 4).
+    # This implies variable growth of columns.
+    # `jnp.concatenate` handles it.
+    
+    def case_n0():
+        # n=0 -> 1 node. Return (1, 1) global edge.
+        return jnp.ones((1, 1), dtype=H.dtype)
+
+    def case_n_gt_0():
+        # H is (n, m). Pad to (n+1, m).
         H_padded = jnp.pad(H, ((0, 1), (0, 0)), mode='constant', constant_values=0)
         
-        # Concatenate: [Old Edges | Seq | Ctx | Global]
-        # User code: new_H = jnp.concatenate([H, new_cols[:, :2]], axis=1) ... then global
-        # Note: We use H_padded instead of H
-        new_H = jnp.concatenate([H_padded, new_cols[:, :2]], axis=1)
-        new_H = jnp.concatenate([new_H, new_cols[:, 2:3]], axis=1)
+        # Append new columns
+        # Filter columns to only append valid ones?
+        # If we append zero-columns, we waste memory.
+        # But JAX `cond` needs same return shape?
+        # No, `cond` needs same pytree structure, but shapes can differ IF not compiled with fixed shapes?
+        # Actually `jit` requires static return shapes usually unless dynamic shapes enabled.
+        # But `append_token` is called inside a loop where shapes grow.
+        # JAX recompiles when shapes change.
+        # So we can return different shapes (e.g. 1 col added vs 3 cols added).
         
-    return new_H, new_x
+        # However, to be cleaner/stable:
+        # If n < 1, we only append Global.
+        # If n < 2, we append Global + Seq.
+        # If n >= 2, we append Global + Seq + Ctx.
+        
+        # BUT, to avoid excessive recompilation or logic branching:
+        # User said "append-only H".
+        # If we always append 3 columns (some empty), it's uniform.
+        # But user explicitly asked "n==0 için H = jnp.ones((1,1))".
+        # So let's respect that specific override.
+        
+        # We can use python `if` because `n` is known at trace time if passed as static?
+        # `n = H.shape[0]` is static in JAX JIT if H shape is static.
+        # So python `if` works.
+        
+        # Actually, `append_token` changes shapes, so it triggers recompilation every step anyway (unless `max_new_tokens` loop is scanned).
+        # In `generate_text`, it's a python loop. So recompilation happens.
+        # So we can use python control flow.
+        
+        # Wait, if `n` comes from `H.shape`, it is a static integer during tracing.
+        
+        cols_to_add = []
+        
+        # Seq (if n >= 1) -> Connects n-1, n
+        if n >= 1:
+            c_seq = jnp.zeros((n+1, 1), dtype=H.dtype)
+            c_seq = c_seq.at[n-1, 0].set(1.0)
+            c_seq = c_seq.at[n, 0].set(1.0)
+            cols_to_add.append(c_seq)
+            
+        # Ctx (if n >= 2) -> Connects n-2, n-1, n
+        if n >= 2:
+            c_ctx = jnp.zeros((n+1, 1), dtype=H.dtype)
+            c_ctx = c_ctx.at[n-2, 0].set(1.0)
+            c_ctx = c_ctx.at[n-1, 0].set(1.0)
+            c_ctx = c_ctx.at[n, 0].set(1.0)
+            cols_to_add.append(c_ctx)
+            
+        # Global -> Connects 0..n
+        c_glob = jnp.zeros((n+1, 1), dtype=H.dtype)
+        c_glob = c_glob.at[:, 0].set(1.0)
+        cols_to_add.append(c_glob)
+        
+        new_cols_concat = jnp.concatenate(cols_to_add, axis=1)
+        
+        # Concatenate with padded old H
+        return jnp.concatenate([H_padded, new_cols_concat], axis=1)
+
+    if n == 0:
+        return case_n0()
+    else:
+        return case_n_gt_0()
 
 def generate_text(
     model,
@@ -79,18 +187,6 @@ def generate_text(
 ) -> str:
     """
     Generates text using the trained NovaNet model with incremental hypergraph construction.
-    
-    Args:
-        model: The NovaNet model instance.
-        params: The trained parameters.
-        tokenizer: The tokenizer (HuggingFace).
-        prompt: Input text prompt.
-        max_new_tokens: Maximum number of tokens to generate.
-        temperature: Sampling temperature (0.0 for greedy).
-        seed: Random seed.
-        
-    Returns:
-        Generated text string.
     """
     rng = jax.random.PRNGKey(seed)
     
@@ -99,7 +195,6 @@ def generate_text(
     input_ids = inputs["input_ids"][0].tolist()
     
     # Build initial hypergraph
-    # We use text_to_hypergraph for the initial chunk
     x_np, H_np, _ = text_to_hypergraph(input_ids, max_seq_len=len(input_ids))
     
     # Convert to JAX arrays
@@ -109,19 +204,7 @@ def generate_text(
     # Generation Loop
     for _ in range(max_new_tokens):
         # Forward pass
-        # We need to ensure shapes are correct for the model
-        # Model expects (n, d) and (n, m).
-        # We might need to add batch dimension if model expects it?
-        # NovaNet usually handles unbatched input if designed so, or we unsqueeze.
-        # Checking NovaNet: "x: Float[Array, 'n d']".
-        # But Flax models usually handle batching via vmap or explicit dim.
-        # If trained with batch, it expects batch.
-        # Let's assume we need batch dim (1, n, ...).
-        # But x is (n,). Model embedding will turn it to (n, d).
-        
         logits, _ = model.apply({'params': params}, x, H, train=False)
-        
-        # Logits shape: (n, vocab_size)
         next_token_logits = logits[-1]
         
         if temperature > 0:
@@ -134,7 +217,6 @@ def generate_text(
         # Append token and update H
         H, x = append_token(H, x, next_token)
         
-        # Stop if EOS (optional, depending on tokenizer)
         if next_token == tokenizer.eos_token_id:
             break
             

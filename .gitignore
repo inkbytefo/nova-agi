@@ -24,7 +24,7 @@ checkpoints/
 # IDE
 .vscode/
 .idea/
-
+wandb/
 # System
 .DS_Store
 Thumbs.db
