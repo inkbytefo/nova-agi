@@ -103,8 +103,6 @@ def collate_hypergraphs(
         H_batch = jax.scipy.linalg.block_diag(*Hs)
         
         y_batch = np.concatenate(ys, axis=0)
-        if y_batch.ndim == 1:
-            y_batch = y_batch[:, None]
         mask = np.ones((x_batch.shape[0],), dtype=np.float32)
         return x_batch, H_batch, y_batch, mask
         
@@ -130,8 +128,6 @@ def collate_hypergraphs(
         c_x = np.concatenate(s_xs, axis=0)
         c_H = jax.scipy.linalg.block_diag(*s_Hs) # Use JAX block_diag
         c_y = np.concatenate(s_ys, axis=0)
-        if c_y.ndim == 1:
-            c_y = c_y[:, None]
         
         collated_subs.append((c_x, c_H, c_y))
         max_n = max(max_n, c_x.shape[0])
