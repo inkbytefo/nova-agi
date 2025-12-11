@@ -289,10 +289,27 @@ def load_zinc_subset(n_samples: int = 1000, target_name: str = "logP"):
         logger.warning(f"Error downloading ZINC data: {e}. Using fallback.")
         smiles_list = DEFAULT_SMILES
 
-    # If we failed or have too few, repeat the default list to match n_samples for testing
+    # If too few, augment with randomized SMILES using RDKit when available
     if len(smiles_list) < n_samples:
-        repeats = (n_samples // len(smiles_list)) + 1
-        smiles_list = (smiles_list * repeats)[:n_samples]
+        base_list = smiles_list if smiles_list else DEFAULT_SMILES
+        augmented = []
+        if Chem is not None:
+            for s in base_list:
+                try:
+                    m = Chem.MolFromSmiles(s)
+                    if m is None:
+                        continue
+                    for _ in range(3):
+                        rs = Chem.MolToSmiles(m, doRandom=True)
+                        augmented.append(rs)
+                except Exception:
+                    continue
+        pool = list(set(base_list + augmented))
+        if not pool:
+            pool = DEFAULT_SMILES
+        rng = np.random.default_rng(0)
+        idxs = rng.choice(len(pool), size=n_samples, replace=True)
+        smiles_list = [pool[i] for i in idxs]
     else:
         smiles_list = smiles_list[:n_samples]
         

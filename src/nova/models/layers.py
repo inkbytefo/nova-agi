@@ -64,9 +64,14 @@ class HypergraphLayer(nn.Module):
             k = nn.Dense(self.features, name='attn_k')(e_raw)
             scale = jnp.sqrt(jnp.array(self.features, dtype=x_trans.dtype))
             attn_logits = jnp.matmul(q, jnp.swapaxes(k, -1, -2)) / (scale + 1e-7)
+            
             mask = (H > 0).astype(x_trans.dtype)
-            neg_inf = jnp.finfo(x_trans.dtype).min
-            masked_logits = attn_logits * mask + (1.0 - mask) * neg_inf
+            neg_inf = -1e9 # Safe negative infinity equivalent for logits
+            
+            # Fix: Use jnp.where to avoid NaN from 0 * -inf
+            masked_logits = jnp.where(mask > 0, attn_logits, neg_inf)
+            
+            # Softmax
             exp_logits = jnp.exp(masked_logits - jnp.max(masked_logits, axis=-2, keepdims=True)) * mask
             denom = jnp.sum(exp_logits, axis=-2, keepdims=True) + 1e-7
             attn_weights = exp_logits / denom

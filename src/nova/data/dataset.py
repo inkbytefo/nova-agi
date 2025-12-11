@@ -7,7 +7,6 @@ import numpy as np
 from typing import List, Tuple, Dict, Iterator
 from jaxtyping import Float, Array
 import chex
-from scipy.linalg import block_diag
 
 def generate_synthetic_data(
     num_samples: int,
@@ -87,12 +86,25 @@ def collate_hypergraphs(
             y_batch: (num_devices, N_max, 1)
             mask: (num_devices, N_max) - 1 for valid nodes, 0 for padded
     """
+    def _block_diag_dense(mats: List[np.ndarray]) -> np.ndarray:
+        total_n = sum(m.shape[0] for m in mats)
+        total_m = sum(m.shape[1] for m in mats)
+        out = np.zeros((total_n, total_m), dtype=np.float32)
+        r = 0
+        c = 0
+        for m in mats:
+            n, k = m.shape
+            out[r:r+n, c:c+k] = m
+            r += n
+            c += k
+        return out
+
     xs, Hs, ys = zip(*batch)
     
     if num_devices == 1:
         # Standard disjoint union for single device
         x_batch = np.concatenate(xs, axis=0)
-        H_batch = block_diag(*Hs)
+        H_batch = _block_diag_dense(list(Hs))
         y_batch = np.concatenate(ys, axis=0)
         if y_batch.ndim == 1:
             y_batch = y_batch[:, None]
@@ -119,7 +131,7 @@ def collate_hypergraphs(
         # Collate this shard
         s_xs, s_Hs, s_ys = zip(*sub_batch)
         c_x = np.concatenate(s_xs, axis=0)
-        c_H = block_diag(*s_Hs)
+        c_H = _block_diag_dense(list(s_Hs))
         c_y = np.concatenate(s_ys, axis=0)
         if c_y.ndim == 1:
             c_y = c_y[:, None]
