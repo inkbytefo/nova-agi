@@ -7,6 +7,7 @@ from transformers import AutoTokenizer
 from datasets import load_dataset
 
 from nova.data.hypergraph_builder import build_incremental_H
+from nova.data.tokenizer import HypergraphTokenizer
 
 def text_to_hypergraph(token_ids: List[int], max_seq_len: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
@@ -27,10 +28,7 @@ def text_to_hypergraph(token_ids: List[int], max_seq_len: int) -> Tuple[np.ndarr
             # Only 1 token: input x=[id], target y=[pad] (or 0)
             x = np.array([token_ids[0]], dtype=np.int32)
             y = np.array([0], dtype=np.int32) # Padding token usually 0
-            # H for 1 node: Just 1 global edge (self-loop) or empty?
-            # User suggested "if n_nodes >= 2: edges.append(list(range(n_nodes)))" for global.
-            # But generate.py handles n=1 case.
-            # Let's return a valid H with 1 global edge (self-loop) so model doesn't crash on convolution.
+            # Return a valid H with 1 global edge (self-loop)
             H = np.ones((1, 1), dtype=np.float32)
             return x, H, y
         else:
@@ -42,18 +40,20 @@ def text_to_hypergraph(token_ids: List[int], max_seq_len: int) -> Tuple[np.ndarr
     
     n_nodes = len(x)
     
-    # Use separate fixed counts
-    H = build_incremental_H(n_nodes, seq_fixed=8, ctx_fixed=4)
+    # For training, build graph over entire sequence
+    # Use full length for seq_fixed and ctx_fixed to ensure connectivity across the whole sequence
+    H = build_incremental_H(n_nodes, seq_fixed=n_nodes, ctx_fixed=n_nodes)
     
     return x, H, y
 
 class TurkishTextStream:
     """
-    Streaming dataset loader for Turkish text corpora.
+    Streaming dataset loader for Turkish text corpora using HDCT (Hypergraph-Dynamic Chunking Tokenizer).
     """
     def __init__(self, dataset_name: str = "ytu-ce-cosmos/Cosmos-Turkish-Corpus-v1.0", max_seq_len: int = 512, split: str = "train"):
         self.max_seq_len = max_seq_len
-        self.tokenizer = AutoTokenizer.from_pretrained("dbmdz/bert-base-turkish-cased")
+        # Switch to tokenizer-free / character-level
+        self.tokenizer = HypergraphTokenizer(vocab_size=5000)
         
         try:
             self.dataset = load_dataset(dataset_name, split=split, streaming=True)
@@ -77,17 +77,21 @@ class TurkishTextStream:
             if not text:
                 continue
                 
+            # Tokenize using HDCT (Character level)
             encoded = self.tokenizer(
                 text,
-                truncation=True,
                 max_length=self.max_seq_len,
                 padding="max_length",
                 return_tensors="np"
             )
             
-            ids = encoded["input_ids"][0].tolist()
-            
-            x, H, y = text_to_hypergraph(ids, self.max_seq_len)
-            
-            if len(x) > 0:
-                yield x, H, y
+            # Extract IDs
+            if "input_ids" in encoded:
+                # Handle possible batch dimension if provided by some tokenizer implementations,
+                # but our class returns [1, L] for return_tensors='np'
+                ids = encoded["input_ids"][0].tolist()
+                
+                x, H, y = text_to_hypergraph(ids, self.max_seq_len)
+                
+                if len(x) > 0:
+                    yield x, H, y

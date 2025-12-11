@@ -23,7 +23,7 @@ class NovaNet(nn.Module):
     out_dim: int
     use_attention: bool = False
     dropout_rate: float = 0.0
-    vocab_size: int = 32000 # Default for BERT-like tokenizers
+    vocab_size: int = 5000 # HDCT character-level vocab size
     embedding_dim: int = 512 # Dimension of token embeddings
     
     @nn.compact

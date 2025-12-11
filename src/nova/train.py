@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional
 from functools import partial
 import os
 import time
-from transformers import AutoTokenizer
+from nova.data.tokenizer import HypergraphTokenizer
 
 from nova.models.nova import NovaNet
 from nova.core.loss import nova_loss
@@ -57,10 +57,9 @@ class Trainer:
             self.eval_step = self._eval_step_jit
             
         # Initialize Tokenizer for Generation Monitoring
-        # Only if we are likely using text data or if explicit request
-        # But per instructions, we just do it.
+        # Use HypergraphTokenizer
         try:
-            self.tokenizer = AutoTokenizer.from_pretrained("dbmdz/bert-base-turkish-cased")
+            self.tokenizer = HypergraphTokenizer()
         except Exception as e:
             print(f"Warning: Could not load tokenizer: {e}")
             self.tokenizer = None

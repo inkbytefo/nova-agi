@@ -28,7 +28,8 @@ code_sources:
 cot_sources:
   gsm8k_tr:
     path: "bezir/gsm8k-tr"
+    split: "test"
     weight: 1.0
 
-max_seq_len: 128
+max_seq_len: 2048
 num_samples: 1000000 # Virtual size for progress bars

@@ -41,6 +41,17 @@ def build_incremental_H(
     if n_nodes > 1:
         edges.append(list(range(n_nodes)))
         
+    # 4. Extended N-gram Edges (4-gram and 5-gram for HDCT)
+    # 4-gram
+    start_4 = max(0, n_nodes - ctx_fixed - 3)
+    for i in range(start_4, n_nodes - 3):
+        edges.append([i, i+1, i+2, i+3])
+        
+    # 5-gram
+    start_5 = max(0, n_nodes - ctx_fixed - 4)
+    for i in range(start_5, n_nodes - 4):
+        edges.append([i, i+1, i+2, i+3, i+4])
+        
     # Build H matrix
     m_edges = len(edges)
     if m_edges == 0:

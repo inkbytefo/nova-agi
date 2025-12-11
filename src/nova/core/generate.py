@@ -4,7 +4,7 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
-from transformers import AutoTokenizer
+from nova.data.tokenizer import HypergraphTokenizer
 from nova.data.text_stream import text_to_hypergraph
 
 @jax.jit
