@@ -4,13 +4,11 @@ defaults:
   - dataset: c4_tr # Default, but overridable
 
 model:
-  hidden_dim: 512
-  layers: 8
-  num_heads: 8
-  dropout: 0.1
-  use_attention: true
-  vocab_size: 32000
-  embedding_dim: 512
+  vocab_size: 5000
+  out_dim: 5000
+  hidden_dim: 768
+  num_layers: 12
+  embedding_dim: 768
 
 training:
   lr: 0.0003
@@ -18,7 +16,8 @@ training:
   # TPU v3-8 has 8 cores. 
   # Batch size 128 per core => 1024 Global Batch Size.
   # This ensures high utilization.
-  batch_size: 1024  
+  batch_size: 512
+  max_seq_len: 2048  
   steps_per_epoch: 5000  # 5000 * 1024 = ~5M samples per epoch
   val_steps: 100
   seed: 42
@@ -28,7 +27,7 @@ training:
 dataset:
   name: "c4_tr"
   mode: "curriculum"
-  max_seq_len: 128
+  max_seq_len: 2048
   # Streaming dataset doesn't need explicit size, handled by steps_per_epoch
 
 use_wandb: true
