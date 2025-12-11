@@ -138,6 +138,7 @@ def collate_hypergraphs(
         max_m = max(max_m, c_H.shape[1])
         
     # Second pass: Pad and stack
+    # Determine shapes and types from first sample
     if xs[0].ndim == 1:
         # 1D features (e.g. token IDs)
         final_x = np.zeros((num_devices, max_n), dtype=np.int32)
@@ -146,7 +147,16 @@ def collate_hypergraphs(
         final_x = np.zeros((num_devices, max_n, feature_dim), dtype=np.float32)
     
     final_H = np.zeros((num_devices, max_n, max_m), dtype=np.float32)
-    final_y = np.zeros((num_devices, max_n, 1), dtype=np.float32)
+    
+    # Determine target shape and dtype
+    y_sample = ys[0]
+    y_dtype = y_sample.dtype
+    if y_sample.ndim == 1:
+        final_y = np.zeros((num_devices, max_n), dtype=y_dtype)
+    else:
+        y_dim = y_sample.shape[1]
+        final_y = np.zeros((num_devices, max_n, y_dim), dtype=y_dtype)
+    
     final_mask = np.zeros((num_devices, max_n), dtype=np.float32)
     
     for i, (c_x, c_H, c_y) in enumerate(collated_subs):
@@ -156,7 +166,13 @@ def collate_hypergraphs(
         else:
             final_x[i, :n, :] = c_x
         final_H[i, :n, :m] = c_H
-        final_y[i, :n, :] = c_y
+        
+        # Handle y assignment based on dimension
+        if c_y.ndim == 1:
+             final_y[i, :n] = c_y
+        else:
+             final_y[i, :n, :] = c_y
+             
         final_mask[i, :n] = 1.0
         
     return final_x, final_H, final_y, final_mask
