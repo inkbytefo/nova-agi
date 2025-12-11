@@ -119,107 +119,86 @@ def collate_hypergraphs(
     num_devices: int = 1
 ) -> Tuple[Float[Array, "B N_max d"], Float[Array, "B N_max M_max"], Float[Array, "B N_max 1"], Float[Array, "B N_max"]]:
     """
-    Collates a batch of hypergraphs. 
-    If num_devices > 1, splits batch and pads to create a sharded batch for pmap.
+    Collates a batch of hypergraphs by stacking them (with padding).
+    Preserves the batch dimension to allow per-sample attention.
+    If num_devices > 1, reshapes to (num_devices, sub_batch, ...).
     
     Args:
         batch: List of (x, H, y) tuples.
         num_devices: Number of devices to shard for.
         
     Returns:
-        If num_devices == 1:
-            x_batch: (N_total, d)
-            H_batch: (N_total, M_total)
-            y_batch: (N_total, 1)
-            mask: (N_total,) - All ones
-        If num_devices > 1:
-            x_batch: (num_devices, N_max, d)
-            H_batch: (num_devices, N_max, M_max)
-            y_batch: (num_devices, N_max, 1)
-            mask: (num_devices, N_max) - 1 for valid nodes, 0 for padded
+        x_batch: (..., N_max, d)
+        H_batch: (..., N_max, M_max)
+        y_batch: (..., N_max, 1) or (..., N_max, y_dim)
+        mask: (..., N_max) - 1 for valid nodes, 0 for padded
     """
-    # Note: We use jax.scipy.linalg.block_diag for efficiency as requested.
-    # This assumes we are in the main process or JAX is safe to use.
-    
     xs, Hs, ys = zip(*batch)
-    
-    if num_devices == 1:
-        # Standard disjoint union for single device
-        x_batch = np.concatenate(xs, axis=0)
-        
-        # Use jax.scipy.linalg.block_diag for H
-        # Convert to JAX arrays first to ensure correct dispatch, or let JAX handle numpy inputs
-        # Unpack list of H matrices
-        H_batch = jax.scipy.linalg.block_diag(*Hs)
-        
-        y_batch = np.concatenate(ys, axis=0)
-        mask = np.ones((x_batch.shape[0],), dtype=np.float32)
-        return x_batch, H_batch, y_batch, mask
-        
-    # Sharding logic
     batch_size = len(batch)
-    assert batch_size % num_devices == 0, f"Batch size {batch_size} must be divisible by num_devices {num_devices}"
-    sub_batch_size = batch_size // num_devices
     
-    sub_xs, sub_Hs, sub_ys, sub_masks = [], [], [], []
+    # 1. Determine Max Dimensions
+    # We find the max N and M across the *entire* batch to ensure uniform shape.
+    max_n = max(x.shape[0] for x in xs)
+    max_m = max(h.shape[1] for h in Hs)
     
-    # First pass: Collate sub-batches to find max dimensions
-    collated_subs = []
-    max_n = 0
-    max_m = 0
-    
-    for i in range(num_devices):
-        start = i * sub_batch_size
-        end = start + sub_batch_size
-        sub_batch = batch[start:end]
-        
-        # Collate this shard
-        s_xs, s_Hs, s_ys = zip(*sub_batch)
-        c_x = np.concatenate(s_xs, axis=0)
-        c_H = jax.scipy.linalg.block_diag(*s_Hs) # Use JAX block_diag
-        c_y = np.concatenate(s_ys, axis=0)
-        
-        collated_subs.append((c_x, c_H, c_y))
-        max_n = max(max_n, c_x.shape[0])
-        max_m = max(max_m, c_H.shape[1])
-        
-    # Second pass: Pad and stack
     # Determine shapes and types from first sample
     if xs[0].ndim == 1:
         # 1D features (e.g. token IDs)
-        final_x = np.zeros((num_devices, max_n), dtype=np.int32)
+        feature_shape = ()
+        dtype_x = np.int32
     else:
         feature_dim = xs[0].shape[1]
-        final_x = np.zeros((num_devices, max_n, feature_dim), dtype=np.float32)
-    
-    final_H = np.zeros((num_devices, max_n, max_m), dtype=np.float32)
-    
-    # Determine target shape and dtype
+        feature_shape = (feature_dim,)
+        dtype_x = np.float32
+        
     y_sample = ys[0]
-    y_dtype = y_sample.dtype
+    dtype_y = y_sample.dtype
     if y_sample.ndim == 1:
-        final_y = np.zeros((num_devices, max_n), dtype=y_dtype)
+        y_shape = ()
     else:
         y_dim = y_sample.shape[1]
-        final_y = np.zeros((num_devices, max_n, y_dim), dtype=y_dtype)
-    
-    final_mask = np.zeros((num_devices, max_n), dtype=np.float32)
-    
-    for i, (c_x, c_H, c_y) in enumerate(collated_subs):
-        n, m = c_H.shape
-        if c_x.ndim == 1:
-            final_x[i, :n] = c_x
-        else:
-            final_x[i, :n, :] = c_x
-        final_H[i, :n, :m] = c_H
+        y_shape = (y_dim,)
         
-        # Handle y assignment based on dimension
-        if c_y.ndim == 1:
-             final_y[i, :n] = c_y
+    # 2. Allocate Padding Arrays
+    # Shapes: [Batch, MaxN, ...]
+    final_x = np.zeros((batch_size, max_n) + feature_shape, dtype=dtype_x)
+    final_H = np.zeros((batch_size, max_n, max_m), dtype=np.float32)
+    final_y = np.zeros((batch_size, max_n) + y_shape, dtype=dtype_y)
+    final_mask = np.zeros((batch_size, max_n), dtype=np.float32)
+    
+    # 3. Fill Arrays
+    for i in range(batch_size):
+        x, H, y = xs[i], Hs[i], ys[i]
+        n, m = H.shape
+        
+        # Fill x
+        if x.ndim == 1:
+            final_x[i, :n] = x
         else:
-             final_y[i, :n, :] = c_y
-             
+            final_x[i, :n, :] = x
+            
+        # Fill H
+        final_H[i, :n, :m] = H
+        
+        # Fill y
+        if y.ndim == 1:
+            final_y[i, :n] = y
+        else:
+            final_y[i, :n, :] = y
+            
+        # Fill mask
         final_mask[i, :n] = 1.0
+        
+    # 4. Handle Sharding if needed
+    if num_devices > 1:
+        assert batch_size % num_devices == 0, f"Batch size {batch_size} must be divisible by num_devices {num_devices}"
+        sub_batch = batch_size // num_devices
+        
+        # Reshape to [num_devices, sub_batch, ...]
+        final_x = final_x.reshape((num_devices, sub_batch, max_n) + feature_shape)
+        final_H = final_H.reshape((num_devices, sub_batch, max_n, max_m))
+        final_y = final_y.reshape((num_devices, sub_batch, max_n) + y_shape)
+        final_mask = final_mask.reshape((num_devices, sub_batch, max_n))
         
     return final_x, final_H, final_y, final_mask
 
