@@ -40,7 +40,8 @@ class CurriculumLoader:
 
         # Code
         if ratios.get("code", 0) > 0:
-            code_ds = load_dataset("bigcode/the-stack-smol", languages=["python"], split="train", streaming=True)
+            # Correct usage: Filter by data_dir for specific language in 'the-stack-smol'
+            code_ds = load_dataset("bigcode/the-stack-smol", data_dir="data/python", split="train", streaming=True)
             datasets.append(code_ds)
             probabilities.append(ratios["code"])
 
