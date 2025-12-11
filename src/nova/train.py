@@ -144,7 +144,7 @@ class Trainer:
         return state, metrics
 
     @staticmethod
-    @partial(jax.pmap, axis_name='batch', in_axes=(0, 0, 0, 0, 0, None, None, 0, None))
+    @partial(jax.pmap, axis_name='batch', in_axes=(0, 0, 0, 0, 0, None, None, 0, None), static_argnums=(8,))
     def _train_step_pmap(state, x, H, y, mask, alpha, beta, dropout_key, refine_topology: bool = False):
         grads, metrics = Trainer._train_logic(
             state, x, H, y, mask, alpha, beta, dropout_key, refine_topology
@@ -286,6 +286,10 @@ class Trainer:
                         refine_topology
                     )
                 epoch_metrics.append(metrics)
+                
+                if step_count % 10 == 0:
+                    print(f"Epoch {epoch} | Step {step_count}/{steps_per_epoch} (Global {global_step}) | Loss: {metrics['loss'][0]:.4f}", flush=True)
+
                 step_count += 1
                 global_step += 1
             
