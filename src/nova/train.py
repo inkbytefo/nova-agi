@@ -19,6 +19,7 @@ from nova.core.loss import thermodynamic_loss
 from nova.data.dataset import get_dataloader, get_streaming_dataloader
 from nova.core.topology import update_topology
 from nova.core.generate import generate_text
+from nova.data.curriculum import CurriculumLoader
 
 class TrainState(train_state.TrainState):
     # Add any extra state if needed, for now standard is fine
@@ -168,6 +169,7 @@ class Trainer:
         
         # Check if streaming
         is_streaming = not hasattr(train_data, "__len__")
+        is_curriculum = isinstance(train_data, CurriculumLoader)
         
         # Initialize state with a dummy batch
         if is_streaming:
@@ -188,6 +190,34 @@ class Trainer:
         
         # Topology update settings
         topology_start_epoch = 5 # Wait for embeddings to stabilize
+        
+        phases = [
+            {
+                "end_step": 15000,
+                "ratios": {
+                    "turkish_corpus": 0.7,
+                    "python_code": 0.3,
+                },
+            },
+            {
+                "end_step": 30000,
+                "ratios": {
+                    "turkish_corpus": 0.4,
+                    "python_code": 0.3,
+                    "turkish_instructions": 0.3,
+                },
+            },
+            {
+                "end_step": 45000,
+                "ratios": {
+                    "turkish_cot": 0.4,
+                    "python_code": 0.4,
+                    "turkish_corpus": 0.2,
+                },
+            },
+        ]
+        current_phase_idx = -1
+        global_step = 0
         
         print(f"Starting training for {epochs} epochs...")
         
@@ -214,7 +244,20 @@ class Trainer:
             for x, H, y, mask in train_loader:
                 if is_streaming and step_count >= steps_per_epoch:
                     break
-                    
+                if is_curriculum:
+                    phase_idx = 0
+                    for i, ph in enumerate(phases):
+                        if global_step < ph["end_step"]:
+                            phase_idx = i
+                            break
+                    if phase_idx != current_phase_idx:
+                        current_phase_idx = phase_idx
+                        train_data.set_ratios(phases[phase_idx]["ratios"])
+                        msg = f"Phase Change -> {phase_idx} at step {global_step}"
+                        print(msg)
+                        if self.config.get("use_wandb", False):
+                            wandb.log({"phase/index": phase_idx, "phase/step": global_step})
+                
                 # Split RNG for dropout
                 rng, dropout_key = jax.random.split(rng)
                 
@@ -233,6 +276,7 @@ class Trainer:
                     )
                 epoch_metrics.append(metrics)
                 step_count += 1
+                global_step += 1
             
             # Aggregate Training Metrics
             if self.is_pmap:

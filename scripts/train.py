@@ -16,6 +16,7 @@ from nova.data.zinc import load_zinc_subset
 from nova.data.text_stream import TurkishTextStream
 from datasets import load_dataset
 from nova.train import Trainer
+from nova.data.curriculum import CurriculumLoader
 
 @hydra.main(version_base=None, config_path="../configs", config_name="config")
 def main(cfg: DictConfig):
@@ -57,18 +58,26 @@ def main(cfg: DictConfig):
         OmegaConf.set_struct(cfg, True)
         print(f"Updated model input_dim to {cfg.model.input_dim} for ZINC data.")
     elif dataset_cfg.name == "c4_tr":
-        print("Loading C4 Turkish Streaming data...")
-        # Create stream
-        train_data = TurkishTextStream(
-            max_seq_len=dataset_cfg.get("max_seq_len", 128)
-        )
-        
-        # Validation stream
-        val_data = TurkishTextStream(
-             max_seq_len=dataset_cfg.get("max_seq_len", 128)
-        )
-        # Overwrite with validation split
-        val_data.dataset = load_dataset("c4", "tr", streaming=True, split="validation")
+        mode = dataset_cfg.get("mode", "stream")
+        if mode == "curriculum":
+            print("Initializing Curriculum Learning stream...")
+            train_data = CurriculumLoader(
+                max_seq_len=dataset_cfg.get("max_seq_len", 128)
+            )
+            val_data = TurkishTextStream(
+                max_seq_len=dataset_cfg.get("max_seq_len", 128),
+                split="validation"
+            )
+        else:
+            print("Loading C4 Turkish Streaming data...")
+            train_data = TurkishTextStream(
+                max_seq_len=dataset_cfg.get("max_seq_len", 128),
+                split="train"
+            )
+            val_data = TurkishTextStream(
+                 max_seq_len=dataset_cfg.get("max_seq_len", 128),
+                 split="validation"
+            )
         
         # Model config update
         OmegaConf.set_struct(cfg, False)

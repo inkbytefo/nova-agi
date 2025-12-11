@@ -68,7 +68,7 @@ def text_to_hypergraph(token_ids: List[int], max_seq_len: int) -> Tuple[np.ndarr
     return x, H, y
 
 class TurkishTextStream:
-    def __init__(self, max_seq_len: int = 128):
+    def __init__(self, max_seq_len: int = 128, split: str = "train"):
         """
         Streaming dataset for Turkish text using C4.
         
@@ -77,7 +77,26 @@ class TurkishTextStream:
         """
         self.max_seq_len = max_seq_len
         self.tokenizer = AutoTokenizer.from_pretrained("dbmdz/bert-base-turkish-cased")
-        self.dataset = load_dataset("c4", "tr", streaming=True, split="train")
+        self.dataset = self._load_tr_stream(split)
+
+    @staticmethod
+    def _load_tr_stream(split: str):
+        paths = [
+            f"hf://datasets/allenai/c4@refs/convert/parquet/tr/{split}/*.parquet",
+            f"hf://datasets/mc4@refs/convert/parquet/tr/{split}/*.parquet",
+        ]
+        for p in paths:
+            try:
+                return load_dataset(
+                    "parquet",
+                    data_files=p,
+                    split=split,
+                    streaming=True,
+                    columns=["text"],
+                )
+            except Exception:
+                continue
+        raise RuntimeError("Turkish C4/mC4 parquet dataset could not be loaded")
         
     def __iter__(self) -> Iterator[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
         """
