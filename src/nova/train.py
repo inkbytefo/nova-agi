@@ -59,15 +59,25 @@ class Trainer:
         # Initialize Tokenizer for Generation Monitoring
         # Use HypergraphTokenizer
         try:
-            self.tokenizer = HypergraphTokenizer()
+            self.tokenizer = HypergraphTokenizer(vocab_size=config["model"].get("vocab_size", 5000))
         except Exception as e:
             print(f"Warning: Could not load tokenizer: {e}")
             self.tokenizer = None
             
         self.val_prompts = ["Türkiye", "Yapay zeka", "İstanbul", "Merhaba, nasılsın"]
         
+        # Determine Batch Sizes
+        self.global_bs = self.config["training"].get("global_batch_size", self.config["training"]["batch_size"])
+        self.per_device_bs = self.global_bs // self.num_devices if self.num_devices > 0 else self.global_bs
+        print(f"Trainer Configured: Global Batch Size={self.global_bs}, Per-Device={self.per_device_bs}, Devices={self.num_devices}")
+
         # YENİ: profesyonel validation iterator
-        self.val_data = build_validation_loader(max_seq_len=self.config["training"].get("max_seq_len", 2048))
+        # Fix: Fallback for max_seq_len if not explicitly in training/dataset config
+        self.max_seq_len = self.config.get("max_seq_len", 
+                                         self.config["dataset"].get("max_seq_len", 
+                                                                  self.config["training"].get("max_seq_len", 2048)))
+        
+        self.val_data = build_validation_loader(max_seq_len=self.max_seq_len)
         print(f"Professional validation loader ready – {10000} fixed examples")
 
     def create_train_state(self, rng, sample_x, sample_H):
@@ -192,7 +202,8 @@ class Trainer:
         state = self.create_train_state(init_rng, sample_x, sample_H)
         
         epochs = self.config["training"]["epochs"]
-        batch_size = self.config["training"]["batch_size"]
+        epochs = self.config["training"]["epochs"]
+        batch_size = self.global_bs # Use calculated global batch size
         alpha = self.config["training"]["alpha"] # Energy weight
         beta = self.config["training"]["beta"]   # Entropy weight
         

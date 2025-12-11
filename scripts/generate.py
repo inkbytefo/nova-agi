@@ -4,7 +4,7 @@
 import jax
 import jax.numpy as jnp
 from flax.training import checkpoints
-from transformers import AutoTokenizer
+from nova.data.tokenizer import HypergraphTokenizer
 import hydra
 from omegaconf import DictConfig
 import os
@@ -17,17 +17,19 @@ def main(cfg: DictConfig):
     print(f"Loading model with config: {cfg.model}")
     
     # 1. Initialize Tokenizer
-    tokenizer_name = "dbmdz/bert-base-turkish-cased"
+    # Fix: Use HypergraphTokenizer for HDCT compatibility
+    tokenizer_name = "HypergraphTokenizer" 
     print(f"Loading tokenizer: {tokenizer_name}")
     try:
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+        vocab_size = cfg.model.get("vocab_size", 5000)
+        tokenizer = HypergraphTokenizer(vocab_size=vocab_size)
     except Exception as e:
         print(f"Error loading tokenizer: {e}")
         return
 
     # 2. Initialize Model
     # We need to replicate the init logic to get the correct shapes
-    vocab_size = tokenizer.vocab_size
+    # vocab_size is already set above
     model = NovaNet(
         hidden_dim=cfg.model.hidden_dim,
         num_layers=cfg.model.num_layers,

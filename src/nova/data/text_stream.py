@@ -42,7 +42,7 @@ def text_to_hypergraph(token_ids: List[int], max_seq_len: int) -> Tuple[np.ndarr
     
     # For training, build graph over entire sequence
     # Use full length for seq_fixed and ctx_fixed to ensure connectivity across the whole sequence
-    H = build_incremental_H(n_nodes, seq_fixed=n_nodes, ctx_fixed=n_nodes)
+    H = build_incremental_H(n_nodes, seq_fixed=16, ctx_fixed=8)
     
     return x, H, y
 
