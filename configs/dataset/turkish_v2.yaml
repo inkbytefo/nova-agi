@@ -30,23 +30,17 @@ cot_sources:
 
 # YENİ: Profesyonel validation setleri
 validation_sets:
-  - name: "tr_wikipedia_sample"
-    path: "mc4"
+  - name: "culturax_tr"
+    path: "uonlp/CulturaX"
     languages: ["tr"]
-    size: 10000                     # 10k örnek
-    split_ratio: 0.001              # mc4’ten %0.1 çekiyoruz, hızlı ve sabit seed
+    size: 13000
+    split_ratio: 0.001
     seed: 42
 
   - name: "open_subtitles_tr"
-    path: "open_subtitles"
+    path: "Helsinki-NLP/open_subtitles"
     languages: ["tr"]
     size: 5000
-
-  - name: "turkish_news"
-    path: "oscar"
-    config_name: "unshuffled_deduplicated_tr"
-    size: 5000
-    split_ratio: 0.0005
 
 max_seq_len: 2048
 num_samples: 100000000   # train için sanal büyük sayı

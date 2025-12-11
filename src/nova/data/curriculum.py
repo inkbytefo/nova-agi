@@ -77,11 +77,15 @@ def build_validation_loader(max_seq_len: int = 2048):
     tokenizer = HypergraphTokenizer(vocab_size=5000)
     
     # 10k sabit, hızlı, tekrarlanabilir validation seti
+    # 10k sabit, hızlı, tekrarlanabilir validation seti
     val_sources = [
-        ("mc4", "tr", None, 4000),
-        ("oscar", "unshuffled_deduplicated_tr", None, 3000),
-        ("open_subtitles", None, "tr", 2000),
-        ("ytu-ce-cosmos/Cosmos-Turkish-Corpus-v1.0", None, None, 1000),
+        # CulturaX (Cleaned MC4 + Oscar), artık erişim iznimiz var
+        ("uonlp/CulturaX", "tr", None, 5000),
+        # Dialogue / Conversational
+        ("Helsinki-NLP/open_subtitles", None, "tr", 2000),
+        # High Quality Corpus (Reserved part implied by streaming logic if careful, 
+        # but here just grabbing diverse samples)
+        ("ytu-ce-cosmos/Cosmos-Turkish-Corpus-v1.0", None, None, 3000),
     ]
     
     examples = []
