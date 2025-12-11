@@ -82,10 +82,15 @@ def main(cfg: DictConfig):
                  split="validation"
             )
         
+        
         # Model config update
         OmegaConf.set_struct(cfg, False)
-        cfg.model.input_dim = 1 # Token IDs are scalar integers
-        cfg.model.output_dim = 32000 # Vocab size for prediction
+        # Ensure input_dim is 1 for text token IDs
+        cfg.model.input_dim = 1 
+        # Don't override output_dim or vocab_size if they exist in config
+        if "output_dim" not in cfg.model:
+            cfg.model.output_dim = cfg.model.get("out_dim", 5000)
+        
         # Ensure we set steps_per_epoch if not present
         if "steps_per_epoch" not in cfg.training:
             cfg.training.steps_per_epoch = 1000
@@ -114,14 +119,16 @@ def main(cfg: DictConfig):
         print(f"Train size: {len(train_data)}, Val size: {len(val_data)}")
     
     # 2. Model Initialization
+    # Fix: Use config values instead of hardcoded defaults
+    vocab_size = cfg.model.get("vocab_size", cfg.model.get("out_dim", 5000))
     model = NovaNet(
         hidden_dim=cfg.model.hidden_dim,
-        num_layers=cfg.model.layers,
-        out_dim=cfg.model.output_dim,
-        use_attention=cfg.model.use_attention,
-        dropout_rate=cfg.model.dropout,
-        vocab_size=32000, # Explicitly setting for Turkish BERT
-        embedding_dim=512 # Explicitly setting
+        num_layers=cfg.model.get("num_layers", cfg.model.get("layers", 12)), # Handle 'layers' vs 'num_layers' key mismatch
+        out_dim=cfg.model.get("out_dim", cfg.model.get("output_dim", vocab_size)),
+        use_attention=cfg.model.get("use_attention", True),
+        dropout_rate=cfg.model.get("dropout_rate", cfg.model.get("dropout", 0.1)),
+        vocab_size=vocab_size,
+        embedding_dim=cfg.model.get("embedding_dim", 768)
     )
     
     # 3. Trainer Initialization
