@@ -9,6 +9,7 @@ corpus_sources:
     weight: 0.5
   bellaturca:
     path: "turkish-nlp-suite/BellaTurca"
+    config_name: "OzenliDerlem"
     weight: 0.5
 
 # Instruction Tuning Data
@@ -17,10 +18,10 @@ instruction_sources:
     path: "AlicanKiraz0/Turkish-SFT-Dataset-v1.0"
     weight: 1.0
 
-# Code Data (Keeping existing or standard)
+# Code Data
 code_sources:
   python_code:
-    path: "codeparrot/github-code-clean" # Example, keeping placeholder or simple subset
+    path: "bigcode/the-stack-smol"
     weight: 1.0
 
 max_seq_len: 128
