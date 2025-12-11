@@ -13,10 +13,10 @@ class CurriculumLoader:
     def __init__(
         self,
         max_seq_len: int = 128,
-        cosmos_dataset: str = "ytu-ce-cosmos/Cosmos-Turkish-Corpus",
+        cosmos_dataset: str = "ytu-ce-cosmos/Cosmos-Turkish-Corpus-v1.0",
         stack_dataset: str = "bigcode/the-stack-smol",
-        alpaca_dataset: str = "bacalhau-project/Turkish-Alpaca",
-        cot_dataset: Optional[str] = None,
+        alpaca_dataset: str = "TFLai/Turkish-Alpaca",
+        cot_dataset: str = "malhajar/gsm8k-tr",
     ):
         self.max_seq_len = max_seq_len
         self.tokenizer = AutoTokenizer.from_pretrained("dbmdz/bert-base-turkish-cased")
@@ -24,12 +24,25 @@ class CurriculumLoader:
         self.sources = {}
         self.iterators = {}
 
-        self.sources["turkish_corpus"] = self._load_stream(dataset=cosmos_dataset, split="train")
-        self.sources["python_code"] = self._load_stream(dataset=stack_dataset, split="train")
-        self.sources["turkish_instructions"] = self._load_stream(dataset=alpaca_dataset, split="train")
+        try:
+            self.sources["turkish_corpus"] = load_dataset(cosmos_dataset, split="train", streaming=True)
+        except Exception as e:
+            raise RuntimeError(f"Failed to load Turkish Corpus '{cosmos_dataset}': {e}")
 
-        if cot_dataset is not None:
-            self.sources["turkish_cot"] = self._load_stream(dataset=cot_dataset, split="train")
+        try:
+            self.sources["python_code"] = load_dataset(stack_dataset, data_dir="data/python", split="train", streaming=True)
+        except Exception as e:
+            raise RuntimeError(f"Failed to load Python Code '{stack_dataset} (data_dir=data/python)': {e}")
+
+        try:
+            self.sources["turkish_instructions"] = load_dataset(alpaca_dataset, split="train", streaming=True)
+        except Exception as e:
+            raise RuntimeError(f"Failed to load Turkish Instructions '{alpaca_dataset}': {e}")
+
+        try:
+            self.sources["turkish_cot"] = load_dataset(cot_dataset, split="train", streaming=True)
+        except Exception as e:
+            raise RuntimeError(f"Failed to load Turkish CoT '{cot_dataset}': {e}")
 
         for k, ds in self.sources.items():
             self.iterators[k] = iter(ds)
@@ -38,6 +51,9 @@ class CurriculumLoader:
         self.ratios = np.ones(len(self.keys), dtype=np.float32) / max(1, len(self.keys))
 
     def set_ratios(self, ratios: Dict[str, float]):
+        for k, v in ratios.items():
+            if v > 0.0 and k not in self.keys:
+                raise ValueError(f"Ratio specifies missing dataset key '{k}' with positive weight {v}. Available: {self.keys}")
         weights = []
         for k in self.keys:
             w = ratios.get(k, 0.0)
@@ -77,26 +93,16 @@ class CurriculumLoader:
             x, H, y = text_to_hypergraph(ids, self.max_seq_len)
             yield x, H, y
 
-    def _load_stream(self, dataset: str, split: str):
-        try:
-            return load_dataset(dataset, split=split, streaming=True)
-        except Exception:
-            return load_dataset(dataset, split=split, streaming=True)
+    # Fallback loaders removed per requirement: use exact datasets only.
 
     @staticmethod
     def _extract_text(source_key: str, example: Dict) -> str:
         if source_key == "python_code":
-            for f in ("content", "code", "text"):
-                v = example.get(f)
-                if isinstance(v, str) and v:
-                    return v
-            return ""
-        if source_key in ("turkish_corpus", "turkish_cot"):
-            for f in ("text", "content"):
-                v = example.get(f)
-                if isinstance(v, str) and v:
-                    return v
-            return ""
+            v = example.get("content") or example.get("code") or example.get("text") or ""
+            return v if isinstance(v, str) else ""
+        if source_key == "turkish_corpus":
+            v = example.get("text") or example.get("content") or ""
+            return v if isinstance(v, str) else ""
         if source_key == "turkish_instructions":
             instr = example.get("instruction") or example.get("prompt") or ""
             inp = example.get("input") or ""
@@ -109,5 +115,20 @@ class CurriculumLoader:
             if out:
                 parts.append(f"Çıkış: {out}")
             return "\n".join(parts)
+        if source_key == "turkish_cot":
+            q = example.get("question") or ""
+            cot = example.get("cot") or ""
+            ans = example.get("answer") or ""
+            if not cot and isinstance(ans, str) and "####" in ans:
+                parts = ans.split("####")
+                cot = parts[0].strip()
+                ans = "####" + parts[1].strip() if len(parts) > 1 else ans
+            s = []
+            if q:
+                s.append(f"Soru: {q}")
+            if cot:
+                s.append(f"Düşünce: {cot}")
+            if ans:
+                s.append(f"Cevap: {ans}")
+            return "\n".join(s)
         return example.get("text", "")
-
