@@ -38,7 +38,7 @@ class CurriculumLoader:
                 # New Sources
                 "instruct": "AlicanKiraz0/Turkish-SFT-Dataset-v1.0", 
                 "cot": "GoktugP/Turkish-GSM8K-CoT",
-                "code": "codeparrot/github-code-clean",
+                "code": "bigcode/the-stack-smol",
                 # Note: 'corpus' is now handled by load_turkish_corpus in dataset.py via config
             }
         else:
@@ -86,7 +86,7 @@ class CurriculumLoader:
         corpus_config = {
              "corpus_sources": {
                  "cosmos": {"path": "ytu-ce-cosmos/Cosmos-Turkish-Corpus-v1.0", "weight": 0.5},
-                 "bellaturca": {"path": "turkish-nlp-suite/BellaTurca", "weight": 0.5},
+                 "bellaturca": {"path": "turkish-nlp-suite/BellaTurca", "config_name": "OzenliDerlem", "weight": 0.5},
              }
         }
         

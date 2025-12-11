@@ -24,12 +24,13 @@ def load_turkish_corpus(
     
     for key, source_cfg in sources.items():
         path = source_cfg.get("path")
+        name = source_cfg.get("config_name", None) # Support subset/config name
         weight = source_cfg.get("weight", 1.0)
         
         try:
             # Try loading specific split, else fallback to 'train'
             # For Cosmos/BellaTurca, we likely only have 'train'
-            ds = load_dataset(path, split="train", streaming=streaming)
+            ds = load_dataset(path, name, split="train", streaming=streaming)
             
             # Validation Logic:
             # If split is 'validation', we skip the first N samples.
