@@ -1,0 +1,15 @@
+jax
+jaxlib
+flax
+optax
+hydra-core
+jaxtyping
+chex
+wandb
+numpy
+scipy
+pytest
+rdkit
+pandas
+transformers
+datasets

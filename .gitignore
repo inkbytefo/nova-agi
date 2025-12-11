@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.env
+.venv
+
+# Hydra
+outputs/
+multirun/
+.hydra/
+
+# Pytest
+.pytest_cache/
+
+# JAX/Flax
+checkpoints/
+*.ckpt
+
+# IDE
+.vscode/
+.idea/
+
+# System
+.DS_Store
+Thumbs.db

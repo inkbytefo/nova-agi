@@ -1,0 +1,27 @@
+model:
+  input_dim: 8
+  hidden_dim: 64
+  output_dim: 1
+  layers: 2
+  dropout: 0.1
+  use_attention: true
+
+training:
+  lr: 0.001
+  epochs: 5
+  batch_size: 4
+  seed: 42
+  alpha: 0.0001 # Energy penalty weight
+  beta: 0.01    # Entropy/Diversity weight
+
+dataset:
+  name: "synthetic"
+  num_samples: 100
+  min_nodes: 10
+  max_nodes: 20
+  min_edges: 5
+  max_edges: 15
+
+use_wandb: false
+wandb_project: "nova-agi"
+run_name: "test-run-1"
