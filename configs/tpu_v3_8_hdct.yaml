@@ -16,13 +16,14 @@ model:
 training:
   lr: 3e-4
   epochs: 20
-  batch_size: 512          # TPU v3-8’de 1024 OOM verir (2048 seq_len + char-level)
+  batch_size: 512          # TPU v3-8'de 1024 OOM verir (2048 seq_len + char-level)
   global_batch_size: 512   # 8 core → per-core 64
   max_seq_len: 2048
   steps_per_epoch: 5000
   val_steps: 200
   seed: 42
-  beta: 0.02               # diversity’yi biraz artırdık, Türkçe’de işe yarıyor
+  alpha: 0.0               # Energy weight (unused)
+  beta: 0.02               # diversity'yi biraz artırdık, Türkçe'de işe yarıyor
   use_wandb: true
 
 dataset:
@@ -31,4 +32,4 @@ dataset:
 use_wandb: true
 wandb_project: "nova-hdct-turkish"
 run_name: "tpu-v3-8-hdct-v1"
-checkpoint_dir: "gs://your-bucket/nova-checkpoints/hdct-v1"   # TPU’da GCS kullan
+checkpoint_dir: "gs://nova-agi-hdct-checkpoints/hdct-v1"   # TPU'da GCS kullan

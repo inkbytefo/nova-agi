@@ -1,5 +1,5 @@
 ## Developer: inkbytefo
-## Modified: 2025-12-11
+## Modified: 2025-12-12
 
 # NovaNet Training Guide on Cloud TPU VM (v3-8)
 
@@ -40,14 +40,15 @@ pip install -r requirements.txt
 
 ## 3. Configuration
 
-The TPU configuration is located at `configs/tpu_v3_8.yaml`.
+The TPU configuration is located at `configs/tpu_v3_8_hdct.yaml`.
 Key settings:
-*   **Batch Size:** 1024 (Global) - Optimized for 8 cores (128/core).
-*   **Model:** 8 Layers, 512 Hidden Dim.
-*   **Dataset:** `c4_tr` (Streaming) with `dataset.mode: curriculum`.
-*   **Sequence Length:** `max_seq_len: 128`.
+*   **Batch Size:** 512 (Global) - Optimized for 8 cores (64/core), HDCT model için ayarlandı.
+*   **Model:** 12 Layers, 768 Hidden Dim, HDCT (Hypergraph Discrete Cosine Transform).
+*   **Dataset:** `turkish_v2` (Streaming) with `dataset.mode: curriculum`.
+*   **Sequence Length:** `max_seq_len: 2048`.
+*   **Checkpoint:** `gs://nova-agi-hdct-checkpoints/hdct-v1` (GCS bucket).
 
-To modify, edit `configs/tpu_v3_8.yaml` using `nano` or `vim`.
+To modify, edit `configs/tpu_v3_8_hdct.yaml` using `nano` or `vim`.
 
 ## 4. Running Training
 
@@ -58,9 +59,9 @@ Start the training using the TPU config:
 wandb login
 
 # Run Training (Curriculum Mode)
-python scripts/train.py --config-name tpu_v3_8 dataset.mode=curriculum
+python scripts/train.py --config-name tpu_v3_8_hdct dataset.mode=curriculum
 
-nohup python scripts/train.py --config-name tpu_v3_8 dataset=turkish_v2 use_wandb=true > train.log 2>&1 &
+nohup python scripts/train.py --config-name tpu_v3_8_hdct dataset.mode=curriculum use_wandb=true > train.log 2>&1 &
 
 # Verify TPU devices recognized (optional)
 python - <<'PY'
@@ -79,13 +80,13 @@ PY
 To generate text using a trained checkpoint:
 
 ```bash
-python scripts/generate.py --config-name tpu_v3_8
+python scripts/generate.py --config-name tpu_v3_8_hdct
 ```
 This will load the latest checkpoint from `checkpoints/` and start an interactive prompt loop.
 
 ## 6. Troubleshooting
 
-*   **OOM (Out of Memory):** Reduce `batch_size` or `hidden_dim` in `configs/tpu_v3_8.yaml`.
+*   **OOM (Out of Memory):** Reduce `batch_size` or `hidden_dim` in `configs/tpu_v3_8_hdct.yaml`.
 *   **Slow Startup:** JAX compilation can take a few minutes for the first step. This is normal.
 *   **NaN Loss:** Try reducing `lr` (Learning Rate).
 *   **No TPU devices:** Ensure `pip install "jax[tpu]"` completed and you are running on a TPU VM.
