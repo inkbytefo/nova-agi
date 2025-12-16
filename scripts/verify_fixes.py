@@ -2,9 +2,21 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
+import sys
+import os
+
+# Apply Flax patch for Python 3.14
+try:
+    import patch_flax
+    patch_flax.apply_patch()
+except ImportError:
+    pass
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
+
 from nova.core.ops import causal_hypergraph_conv
 from nova.data.hypergraph_builder import build_causal_H
-# from nova.models.nova import NovaNet
+from nova.models.nova import NovaNet
 
 def verify_causal_H():
     print("Verifying build_causal_H...")
@@ -113,4 +125,4 @@ def verify_model_jit():
 if __name__ == "__main__":
     verify_causal_H()
     verify_causal_conv()
-    # verify_model_jit()
+    verify_model_jit()

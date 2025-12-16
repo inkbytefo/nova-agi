@@ -1,9 +1,10 @@
-from nova.data.tokenizer import HDCTTokenizer
 import os
 import sys
 
 # Add src to path if needed, though running with PYTHONPATH is better
-sys.path.append(os.path.join(os.getcwd(), 'src'))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
+
+from nova.data.tokenizer import HDCTTokenizer
 
 def check_tokenizer():
     print("Initializing HDCTTokenizer...")

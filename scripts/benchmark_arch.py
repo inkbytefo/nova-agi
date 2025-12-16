@@ -162,15 +162,42 @@ def run_benchmark():
         # Generate Data
         # Dynamic Needle Depth: Sometimes expected at start, sometimes middle
         pct = np.random.uniform(0.0, 0.8) 
-        inputs, targets, masks = generate_niah_batch(BATCH, SEQ_LEN, VOCAB, needle_depth_pct=pct)
-            
-        # JAX conversion
-        inputs = jnp.array(inputs)
-        targets = jnp.array(targets)
-        masks = jnp.array(masks)
+        inputs_raw, targets_raw, masks_raw = generate_niah_batch(BATCH, SEQ_LEN, VOCAB, needle_depth_pct=pct)
         
-        # Use pre-computed H matrices
-        state, loss, acc = train_step_jit(state, inputs, H_in_jax, H_out_jax, targets, masks)
+        # Process with text_to_hypergraph
+        batch_x, batch_H_in, batch_H_out, batch_y = [], [], [], []
+        
+        for i in range(BATCH):
+            # Append dummy token to preserve full sequence in x (since text_to_hypergraph splits x=[:-1])
+            # We want x to be length SEQ_LEN
+            curr_input = inputs_raw[i].tolist() + [0]
+            
+            # text_to_hypergraph returns x, H_in, H_out, y
+            x, h_in, h_out, _ = text_to_hypergraph(curr_input, max_seq_len=SEQ_LEN + 1)
+            
+            # We only need the first SEQ_LEN tokens for x to match our task setup
+            # But wait, text_to_hypergraph returns x as numpy array.
+            # h_in, h_out are (N, M). N = len(x).
+            
+            batch_x.append(x)
+            batch_H_in.append(h_in)
+            batch_H_out.append(h_out)
+            # batch_y is handled by targets_raw from NIAH
+            
+        # Stack and Pad
+        # H matrices might have different sizes if max_edges depends on seq_len, 
+        # but here we passed fixed max_seq_len so max_edges is fixed.
+        # x length is fixed (SEQ_LEN).
+        
+        batch_x = jnp.array(np.stack(batch_x))
+        batch_H_in = jnp.array(np.stack(batch_H_in))
+        batch_H_out = jnp.array(np.stack(batch_H_out))
+        
+        targets = jnp.array(targets_raw)
+        masks = jnp.array(masks_raw)
+        
+        # Use dynamic H matrices
+        state, loss, acc = train_step_jit(state, batch_x, batch_H_in, batch_H_out, targets, masks)
         
         if step % 10 == 0 or step == 0:
             logger.info(f"Step {step:03d} | Loss: {loss:.4f} | Accuracy: {acc:.2%}")
