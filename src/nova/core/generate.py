@@ -193,11 +193,19 @@ def generate_text(
     rng = jax.random.PRNGKey(seed)
     
     # Tokenize prompt
-    inputs = tokenizer(prompt, return_tensors="np")
-    input_ids = inputs["input_ids"][0].tolist()
-    
-    # Build initial hypergraph
-    x_np, H_np, _ = text_to_hypergraph(input_ids, max_seq_len=len(input_ids))
+    if hasattr(tokenizer, "encode_with_topology"):
+        # Use HDCT logic
+        input_ids, edges = tokenizer.encode_with_topology(prompt)
+        x_np, H_np, _ = text_to_hypergraph(input_ids, max_seq_len=len(input_ids), topology_edges=edges)
+    else:
+        # Standard tokenizer
+        inputs = tokenizer(prompt, return_tensors="np")
+        if "input_ids" in inputs:
+            input_ids = inputs["input_ids"][0].tolist()
+        else:
+            input_ids = inputs # Fallback if list returned
+        
+        x_np, H_np, _ = text_to_hypergraph(input_ids, max_seq_len=len(input_ids))
     
     # Convert to JAX arrays
     x = jnp.array(x_np, dtype=jnp.int32)

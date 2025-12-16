@@ -60,18 +60,26 @@ class CurriculumLoader:
         self.dataset = interleave_datasets(datasets, probabilities=probabilities, seed=42, stopping_strategy="all_exhausted")
         logger.info(f"Epoch {epoch}: Target Ratios = {ratios}, Initialized Streaming Datasets.")
 
-    def __iter__(self) -> Iterator[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    def __iter__(self) -> Iterator[Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]:
         for example in self.dataset:
             text = example.get("text", "") or example.get("content", "") or ""
             if not text or len(text.strip()) < 10:
                 continue
 
-            encoded = self.tokenizer(text, max_length=self.max_seq_len, padding="max_length", return_tensors="np")
-            ids = encoded["input_ids"][0].tolist()
-
-            x, H, y = text_to_hypergraph(ids, self.max_seq_len)
+            # Tokenize using HDCT (Semantic-Topo)
+            ids, edges = self.tokenizer.encode_with_topology(text)
+            
+            # Truncate if necessary
+            if len(ids) > self.max_seq_len:
+                ids = ids[:self.max_seq_len]
+                # In naive truncation, we just pass the ids. edges will be filtered by text_to_hypergraph index check.
+            
+            # Pad if needed (manual padding for batch consistency if required, but here we yield samples)
+            # text_to_hypergraph handles the structural padding logic usually.
+            
+            x, H_in, H_out, y = text_to_hypergraph(ids, self.max_seq_len, topology_edges=edges)
             if len(x) > 10:  # çok kısa olanları at
-                yield x.astype(np.int32), H.astype(np.float32), y.astype(np.int32)
+                yield x.astype(np.int32), H_in.astype(np.float32), H_out.astype(np.float32), y.astype(np.int32)
 
 def build_validation_loader(max_seq_len: int = 2048):
     tokenizer = HypergraphTokenizer(vocab_size=5000)
@@ -118,11 +126,13 @@ def build_validation_loader(max_seq_len: int = 2048):
             for ex in examples:
                 text = ex.get("text") or ex.get("content") or ""
                 if len(text) > 50:
-                    encoded = tokenizer(text, max_length=max_seq_len, padding="max_length", return_tensors="np")
-                    ids = encoded["input_ids"][0].tolist()
-                    x, H, y = text_to_hypergraph(ids, max_seq_len)
+                    ids, edges = tokenizer.encode_with_topology(text)
+                    if len(ids) > max_seq_len:
+                        ids = ids[:max_seq_len]
+                        
+                    x, H_in, H_out, y = text_to_hypergraph(ids, max_seq_len, topology_edges=edges)
                     # Filter too short sequences (model crashes or useless)
                     if len(x) > 10:
-                        yield x.astype(np.int32), H.astype(np.float32), y.astype(np.int32)
+                        yield x.astype(np.int32), H_in.astype(np.float32), H_out.astype(np.float32), y.astype(np.int32)
     
     return FixedVal()

@@ -22,90 +22,79 @@ def compute_degrees(H: Float[Array, "... n m"]) -> tuple[Float[Array, "... n"], 
     d_e = jnp.sum(H, axis=-2)
     return d_v, d_e
 
-def hypergraph_conv(
+def causal_hypergraph_conv(
     x: Float[Array, "... n d"],
-    H: Float[Array, "... n m"],
+    H_in: Float[Array, "... n m"],
+    H_out: Float[Array, "... n m"],
     activation: Callable[[Array], Array] = jax.nn.relu,
-    use_attention: bool = False,
-    attention_weights: Optional[Float[Array, "... n m"]] = None,
+    use_global: bool = True,
     eps: float = 1e-7
 ) -> Float[Array, "... n d"]:
     """
-    Performs a Hypergraph Convolution operation.
+    Performs a Causal Hypergraph Convolution.
+    Ensures that node i only receives information from nodes j <= i.
     
-    Implements the core message passing logic:
-    1. Node-to-Edge: Gather node features to hyperedges.
-    2. Edge-Update: Apply non-linearity and optional attention.
-    3. Edge-to-Node: Scatter updated edge features back to nodes.
+    Mechanism:
+    1. Local Edges: Defined by (H_in, H_out).
+       - H_in (Gather): Nodes -> Edge.
+       - H_out (Scatter): Edge -> Nodes.
+       - Causality is enforced by construction: If Edge e scatters to Node i (H_out[i,e]=1),
+         then Edge e must only gather from Nodes j <= i (H_in[j,e]=1).
+         
+    2. Global Context: Implemented via Cumulative Sum (Scan), avoiding explicit O(N^2) edges.
     
-    Includes symmetric degree normalization: D_v^{-1/2} H D_e^{-1} H^T D_v^{-1/2} logic,
-    decomposed into steps for message passing.
-
     Args:
-        x: Node features of shape (..., num_nodes, feature_dim).
-        H: Incidence matrix of shape (..., num_nodes, num_edges). 
-           Entries H[i, j] = 1 if node i is in edge j, else 0.
-        activation: Non-linear activation function applied to edge features.
-        use_attention: If True, uses attention_weights to modulate message passing.
-        attention_weights: Optional attention matrix of shape (..., num_nodes, num_edges).
-                           If provided, replaces binary H for aggregation.
-        eps: Small epsilon for numerical stability in division.
-
+        x: Node features (..., n, d).
+        H_in: Gather incidence matrix (..., n, m).
+        H_out: Scatter incidence matrix (..., n, m).
+        use_global: Whether to add causal global context (cumsum).
+        
     Returns:
-        Updated node features of shape (..., num_nodes, feature_dim).
+        Updated node features.
     """
-    # Relaxed rank checks to allow batching
-    # chex.assert_rank(x, 2)
-    # chex.assert_rank(H, 2)
+    # 1. Node-to-Edge (Gather)
+    # E = H_in^T * X
+    # Normalize? Standard GCN uses degree normalization.
+    # D_e = sum(H_in, axis=0) -> Edge degree (number of nodes in edge)
+    edge_features = jnp.matmul(jnp.swapaxes(H_in, -1, -2), x) # (..., m, d)
     
-    # Get shapes dynamically
-    n = H.shape[-2]
-    m = H.shape[-1]
+    # Edge Normalization (Optional but recommended)
+    # edge_deg = jnp.sum(H_in, axis=-2, keepdims=True) # (..., 1, m)
+    # edge_features = edge_features / (jnp.swapaxes(edge_deg, -1, -2) + eps)
     
-    # 1. Degree Normalization
-    # Compute degrees based on the structural H (binary/weighted)
-    d_v, d_e = compute_degrees(H)
+    # Activation
+    edge_features = activation(edge_features)
     
-    # Inverse square root for Node degrees: D_v^{-1/2}
-    d_v_inv_sqrt = jnp.power(jnp.maximum(d_v, eps), -0.5)
-    # Inverse for Edge degrees: D_e^{-1}
-    d_e_inv = jnp.power(jnp.maximum(d_e, eps), -1.0)
+    # 2. Edge-to-Node (Scatter)
+    # X_local = H_out * E
+    x_local = jnp.matmul(H_out, edge_features) # (..., n, d)
     
-    # Create diagonal matrices (as vectors for broadcasting)
-    # In JAX, we can just multiply columns/rows.
+    # Node Normalization?
+    # node_deg = jnp.sum(H_out, axis=-1, keepdims=True) # (..., n, 1)
+    # x_local = x_local / (node_deg + eps)
     
-    # 2. Node-to-Edge (Gather)
-    # Step 2a: Apply D_v^{-1/2} to X
-    # x_norm = D_v^{-1/2} * X
-    # Handle broadcasting for batch dimensions
-    x_norm = x * d_v_inv_sqrt[..., None]
-    
-    # Step 2b: Aggregate to edges
-    # If using attention, we might use a different H here, but usually 
-    # attention implies learning the weights in H. 
-    # If attention_weights is provided, use it.
-    W = attention_weights if (use_attention and attention_weights is not None) else H
-    
-    # edge_features = W.T @ x_norm
-    # Use swapaxes for correct transpose with batches
-    W_T = jnp.swapaxes(W, -1, -2)
-    edge_features = jnp.matmul(W_T, x_norm)
-    
-    # Step 2c: Apply D_e^{-1} to edge features (Average aggregation equivalent)
-    # edge_features = D_e^{-1} * edge_features
-    edge_features = edge_features * d_e_inv[..., None]
-
-    # 3. Edge-Update
-    # Apply non-linearity
-    edge_features_updated = activation(edge_features)
-    
-    # 4. Edge-to-Node (Scatter)
-    # Step 4a: Aggregate back to nodes using H (or W)
-    # out = W @ edge_features_updated
-    # Shape: (n, m) @ (m, d) -> (n, d)
-    out = jnp.matmul(W, edge_features_updated)
-    
-    # Step 4b: Apply D_v^{-1/2} again (Symmetric norm)
-    out = out * d_v_inv_sqrt[..., None]
-    
-    return out
+    # 3. Global Causal Context
+    if use_global:
+        # Cumulative Sum along sequence dimension (n)
+        # Assumes x is (batch, n, d) or (n, d)
+        # axis -2 is n.
+        global_ctx = jnp.cumsum(x, axis=-2)
+        
+        # Cumulative Mean
+        # counts = 1, 2, ..., n
+        n = x.shape[-2]
+        counts = jnp.arange(1, n + 1, dtype=x.dtype)
+        # Reshape counts to broadcast: (n, 1)
+        shape = [1] * (x.ndim - 2) + [n, 1]
+        counts = counts.reshape(shape)
+        
+        global_ctx = global_ctx / counts
+        
+        # Combine
+        # Using a simple addition or gated mechanism?
+        # Simple addition for now.
+        x_out = x_local + global_ctx
+    else:
+        x_out = x_local
+        
+    return x_out

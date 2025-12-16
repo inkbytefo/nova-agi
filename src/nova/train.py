@@ -80,9 +80,9 @@ class Trainer:
         self.val_data = build_validation_loader(max_seq_len=self.max_seq_len)
         print(f"Professional validation loader ready – {10000} fixed examples")
 
-    def create_train_state(self, rng, sample_x, sample_H):
+    def create_train_state(self, rng, sample_x, sample_H_in, sample_H_out):
         """Initializes the model and optimizer."""
-        variables = self.model.init(rng, sample_x, sample_H)
+        variables = self.model.init(rng, sample_x, sample_H_in, sample_H_out)
         params = variables['params']
         
         tx = optax.adamw(learning_rate=self.config["training"]["lr"])
@@ -99,29 +99,15 @@ class Trainer:
         return state
 
     @staticmethod
-    def _train_logic(state, x, H, y, mask, alpha, beta, dropout_key, refine_topology):
+    def _train_logic(state, x, H_in, H_out, y, mask, alpha, beta, dropout_key, refine_topology):
         """Core training logic (shared by JIT and PMAP)."""
-        # 1. Topology Refinement (Optional)
-        def refine_H(operand):
-            _H, _x, _params = operand
-            _, embeddings = state.apply_fn({'params': _params}, _x, _H, train=False)
-            new_H = update_topology(_H, embeddings)
-            return new_H
-
-        def identity_H(operand):
-            return operand[0]
-
-        H_used = jax.lax.cond(
-            refine_topology,
-            refine_H,
-            identity_H,
-            (H, x, state.params)
-        )
+        # 1. Topology Refinement (Skipped for Causal Hypergraph API compatibility)
+        # Note: update_topology logic for global edge is replaced by causal global context in ops.py
         
         # 2. Gradient Descent Step
         def loss_fn(params):
             logits, embeddings = state.apply_fn(
-                {'params': params}, x, H_used, train=True,
+                {'params': params}, x, H_in, H_out, train=True,
                 rngs={'dropout': dropout_key}
             )
             loss, metrics = nova_loss(
@@ -136,18 +122,18 @@ class Trainer:
 
     @staticmethod
     @partial(jax.jit, static_argnames=['refine_topology'])
-    def _train_step_jit(state, x, H, y, mask, alpha, beta, dropout_key, refine_topology: bool = False):
+    def _train_step_jit(state, x, H_in, H_out, y, mask, alpha, beta, dropout_key, refine_topology: bool = False):
         grads, metrics = Trainer._train_logic(
-            state, x, H, y, mask, alpha, beta, dropout_key, refine_topology
+            state, x, H_in, H_out, y, mask, alpha, beta, dropout_key, refine_topology
         )
         state = state.apply_gradients(grads=grads)
         return state, metrics
 
     @staticmethod
-    @partial(jax.pmap, axis_name='batch', in_axes=(0, 0, 0, 0, 0, None, None, 0, None), static_broadcasted_argnums=(8,))
-    def _train_step_pmap(state, x, H, y, mask, alpha, beta, dropout_key, refine_topology: bool = False):
+    @partial(jax.pmap, axis_name='batch', in_axes=(0, 0, 0, 0, 0, 0, None, None, 0, None), static_broadcasted_argnums=(9,))
+    def _train_step_pmap(state, x, H_in, H_out, y, mask, alpha, beta, dropout_key, refine_topology: bool = False):
         grads, metrics = Trainer._train_logic(
-            state, x, H, y, mask, alpha, beta, dropout_key, refine_topology
+            state, x, H_in, H_out, y, mask, alpha, beta, dropout_key, refine_topology
         )
         # Aggregate gradients across devices
         grads = jax.lax.pmean(grads, axis_name='batch')
@@ -157,8 +143,8 @@ class Trainer:
         return state, metrics
 
     @staticmethod
-    def _eval_logic(state, x, H, y, mask, alpha, beta):
-        logits, embeddings = state.apply_fn({'params': state.params}, x, H, train=False)
+    def _eval_logic(state, x, H_in, H_out, y, mask, alpha, beta):
+        logits, embeddings = state.apply_fn({'params': state.params}, x, H_in, H_out, train=False)
         loss, metrics = nova_loss(
             state.params, logits, y, embeddings, mask=mask, alpha=alpha, beta=beta
         )
@@ -167,13 +153,13 @@ class Trainer:
 
     @staticmethod
     @partial(jax.jit)
-    def _eval_step_jit(state, x, H, y, mask, alpha, beta):
-        return Trainer._eval_logic(state, x, H, y, mask, alpha, beta)
+    def _eval_step_jit(state, x, H_in, H_out, y, mask, alpha, beta):
+        return Trainer._eval_logic(state, x, H_in, H_out, y, mask, alpha, beta)
 
     @staticmethod
-    @partial(jax.pmap, axis_name='batch', in_axes=(0, 0, 0, 0, 0, None, None))
-    def _eval_step_pmap(state, x, H, y, mask, alpha, beta):
-        metrics = Trainer._eval_logic(state, x, H, y, mask, alpha, beta)
+    @partial(jax.pmap, axis_name='batch', in_axes=(0, 0, 0, 0, 0, 0, None, None))
+    def _eval_step_pmap(state, x, H_in, H_out, y, mask, alpha, beta):
+        metrics = Trainer._eval_logic(state, x, H_in, H_out, y, mask, alpha, beta)
         return jax.lax.pmean(metrics, axis_name='batch')
 
     def fit(self, train_data, val_data):
@@ -197,9 +183,9 @@ class Trainer:
         else:
             sample_batch = next(get_dataloader(train_data, batch_size=1, shuffle=False, num_devices=1))
             
-        sample_x, sample_H, _, _ = sample_batch 
+        sample_x, sample_H_in, sample_H_out, _, _ = sample_batch 
         
-        state = self.create_train_state(init_rng, sample_x, sample_H)
+        state = self.create_train_state(init_rng, sample_x, sample_H_in, sample_H_out)
         
         epochs = self.config["training"]["epochs"]
         epochs = self.config["training"]["epochs"]
@@ -265,7 +251,7 @@ class Trainer:
                      )
             
             step_count = 0
-            for x, H, y, mask in train_loader:
+            for x, H_in, H_out, y, mask in train_loader:
                 if is_streaming and step_count >= steps_per_epoch:
                     break
                 
@@ -277,12 +263,12 @@ class Trainer:
                     dropout_keys = jax.random.split(dropout_key, self.num_devices)
                     
                     state, metrics = self.train_step(
-                        state, x, H, y, mask, alpha, beta, dropout_keys, 
+                        state, x, H_in, H_out, y, mask, alpha, beta, dropout_keys, 
                         refine_topology
                     )
                 else:
                     state, metrics = self.train_step(
-                        state, x, H, y, mask, alpha, beta, dropout_key, 
+                        state, x, H_in, H_out, y, mask, alpha, beta, dropout_key, 
                         refine_topology
                     )
                 epoch_metrics.append(metrics)
@@ -315,10 +301,10 @@ class Trainer:
                 )
             
             val_step_count = 0
-            for x, H, y, mask in val_loader:
+            for x, H_in, H_out, y, mask in val_loader:
                 if is_streaming and val_step_count >= val_steps:
                     break
-                metrics = self.eval_step(state, x, H, y, mask, alpha, beta)
+                metrics = self.eval_step(state, x, H_in, H_out, y, mask, alpha, beta)
                 val_metrics_list.append(metrics)
                 val_step_count += 1
             

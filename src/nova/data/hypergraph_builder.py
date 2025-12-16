@@ -3,62 +3,64 @@
 
 import jax.numpy as jnp
 import numpy as np
+from typing import Tuple
 
-def build_incremental_H(
+def build_causal_H(
     n_nodes: int, 
-    seq_fixed: int = 8,
-    ctx_fixed: int = 4
-) -> np.ndarray:
+    max_edges: int = 4096,
+    window_sizes: list = [2, 3, 5]
+) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Builds a hypergraph incidence matrix H with incremental/stable structure.
-    
-    Structure:
-    1. Sequential edges: [i, i+1] for the last `seq_fixed` tokens.
-    2. Context edges: [i, i+1, i+2] for the last `ctx_fixed` tokens.
-    3. Global edge: One edge connecting all nodes (if n_nodes > 1).
+    Builds Causal Hypergraph Incidence Matrices (H_in, H_out) for the entire sequence.
+    Ensures that for any edge e:
+      - It gathers from nodes {t-k, ..., t} (via H_in)
+      - It scatters to node t (via H_out)
+    This guarantees no future leakage.
     
     Args:
-        n_nodes: Number of nodes (tokens).
-        seq_fixed: Number of recent sequential edges to keep.
-        ctx_fixed: Number of recent context edges to keep.
+        n_nodes: Sequence length.
+        max_edges: Fixed size for second dimension (padding).
+        window_sizes: List of n-gram sizes (e.g., [2, 3] for bigrams/trigrams).
         
     Returns:
-        H: Incidence matrix of shape (n_nodes, m_edges).
+        H_in: Gather matrix (n_nodes, max_edges).
+        H_out: Scatter matrix (n_nodes, max_edges).
     """
-    edges = []
+    H_in = np.zeros((n_nodes, max_edges), dtype=np.float32)
+    H_out = np.zeros((n_nodes, max_edges), dtype=np.float32)
     
-    # 1. Sequential Edges (Window 2)
-    start_seq = max(0, n_nodes - seq_fixed - 1)
-    for i in range(start_seq, n_nodes - 1):
-        edges.append([i, i+1])
-        
-    # 2. Context Edges (Window 3)
-    start_ctx = max(0, n_nodes - ctx_fixed - 2)
-    for i in range(start_ctx, n_nodes - 2):
-        edges.append([i, i+1, i+2])
-        
-    # 3. Global Edge
-    if n_nodes > 1:
-        edges.append(list(range(n_nodes)))
-        
-    # 4. Extended N-gram Edges (4-gram and 5-gram for HDCT)
-    # 4-gram
-    start_4 = max(0, n_nodes - ctx_fixed - 3)
-    for i in range(start_4, n_nodes - 3):
-        edges.append([i, i+1, i+2, i+3])
-        
-    # 5-gram
-    start_5 = max(0, n_nodes - ctx_fixed - 4)
-    for i in range(start_5, n_nodes - 4):
-        edges.append([i, i+1, i+2, i+3, i+4])
-        
-    # Build H matrix
-    m_edges = len(edges)
-    if m_edges == 0:
-        return np.zeros((n_nodes, 0), dtype=np.float32)
-        
-    H = np.zeros((n_nodes, m_edges), dtype=np.float32)
-    for j, edge_nodes in enumerate(edges):
-        H[edge_nodes, j] = 1.0
-        
-    return H
+    edge_idx = 0
+    
+    # 1. Self-loops (Unigram context) - Important for preserving identity
+    # Often implicitly handled by residual, but explicit edges help.
+    # We skip explicit self-loops if window_sizes doesn't include 1, 
+    # as residuals handle it.
+    
+    # 2. Sliding Window Edges (N-grams)
+    for w in window_sizes:
+        # For a window of size w, the first valid edge ends at index w-1
+        for t in range(w - 1, n_nodes):
+            if edge_idx >= max_edges:
+                break
+                
+            # Define edge span: [t - w + 1, ..., t]
+            # Gather from these nodes
+            for k in range(w):
+                H_in[t - k, edge_idx] = 1.0
+                
+            # Scatter to the last node (t)
+            H_out[t, edge_idx] = 1.0
+            
+            edge_idx += 1
+            
+    # Note: Global edges are handled dynamically in ops.py via cumsum,
+    # so we don't add them here to save memory/compute.
+    
+    return H_in, H_out
+
+# Legacy alias for compatibility if needed, but discouraged
+def build_incremental_H(n_nodes, seq_fixed=8, ctx_fixed=4):
+    # This was the old leaky implementation. 
+    # We redirect to the safe one, but it returns 2 matrices now.
+    # Raising error to force update.
+    raise DeprecationWarning("build_incremental_H is deprecated. Use build_causal_H.")

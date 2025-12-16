@@ -21,16 +21,16 @@ class NovaNet(nn.Module):
     hidden_dim: int
     num_layers: int
     out_dim: int
-    use_attention: bool = False
     dropout_rate: float = 0.0
     vocab_size: int = 5000 # HDCT character-level vocab size
     embedding_dim: int = 512 # Dimension of token embeddings
-    
+
     @nn.compact
     def __call__(
         self, 
         x: Union[Float[Array, "n d_in"], Int[Array, "n"]], 
-        H: Float[Array, "n m"],
+        H_in: Float[Array, "n m"],
+        H_out: Float[Array, "n m"],
         train: bool = True
     ) -> tuple[Float[Array, "n out_dim"], Float[Array, "n hidden_dim"]]:
         """
@@ -38,7 +38,8 @@ class NovaNet(nn.Module):
         
         Args:
             x: Input node features (float) or token IDs (int).
-            H: Incidence matrix.
+            H_in: Gather Incidence matrix.
+            H_out: Scatter Incidence matrix.
             train: Training mode flag.
             
         Returns:
@@ -65,21 +66,14 @@ class NovaNet(nn.Module):
             # Layer
             x = HypergraphLayer(
                 features=self.hidden_dim,
-                use_attention=self.use_attention,
-                name=f'layer_{i}'
-            )(x, H, train=train)
+                use_global=True
+            )(x, H_in, H_out, train=train)
             
-            # Dropout
-            if train and self.dropout_rate > 0:
-                x = nn.Dropout(self.dropout_rate, deterministic=False)(x)
-            
-            # Residual connection
+            # Residual Connection
             x = x + residual
             
-        # Store embeddings for loss calculation
-        embeddings = x
-        
         # 3. Output Projection
-        logits = nn.Dense(self.out_dim, name='output_proj')(embeddings)
+        embeddings = x
+        logits = nn.Dense(self.out_dim, name='output_proj')(x)
         
         return logits, embeddings

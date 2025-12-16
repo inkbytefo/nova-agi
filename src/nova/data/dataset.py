@@ -66,84 +66,63 @@ def generate_synthetic_data(
     max_edges: int = 15,
     feature_dim: int = 8,
     seed: int = 42
-) -> List[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+) -> List[Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]:
     """
-    Generates synthetic hypergraph data.
-    
-    Args:
-        num_samples: Number of graphs to generate.
-        min_nodes: Minimum number of nodes per graph.
-        max_nodes: Maximum number of nodes per graph.
-        min_edges: Minimum number of edges per graph.
-        max_edges: Maximum number of edges per graph.
-        feature_dim: Node feature dimension.
-        seed: Random seed.
-        
-    Returns:
-        List of tuples (x, H, y).
-        x: (n, feature_dim)
-        H: (n, m)
-        y: (n, 1) - Target (e.g., node degree scaled)
+    Generates synthetic causal hypergraph data.
     """
     rng = np.random.default_rng(seed)
     data = []
     
     for _ in range(num_samples):
-        n = rng.integers(min_nodes, max_nodes + 1)
+        n = rng.integers(10, max_nodes + 1)
         m = rng.integers(min_edges, max_edges + 1)
         
         # Node features
         x = rng.standard_normal((n, feature_dim)).astype(np.float32)
         
-        # Incidence matrix (Bernoulli)
-        # Ensure at least one connection per edge/node usually, but random is fine for synthetic
-        H = rng.binomial(1, 0.3, size=(n, m)).astype(np.float32)
+        # Causal Incidence Matrices
+        # H_in: Gather from past
+        H_in = np.zeros((n, m), dtype=np.float32)
+        # H_out: Scatter to present
+        H_out = np.zeros((n, m), dtype=np.float32)
         
-        # Ensure no empty rows/cols to avoid NaNs in degree norm (though ops.py handles eps)
-        # Let's just leave it random.
+        for j in range(m):
+            # Random edge span [start, end]
+            end = rng.integers(0, n)
+            length = rng.integers(1, 4) # 1 to 3 nodes
+            start = max(0, end - length + 1)
+            
+            H_in[start:end+1, j] = 1.0
+            H_out[end, j] = 1.0
         
-        # Target: Node degree (row sum of H)
-        # Simple regression task: predict node degree
-        # Normalize target roughly
-        d_v = H.sum(axis=1, keepdims=True)
+        # Target
+        d_v = H_in.sum(axis=1, keepdims=True)
         y = (d_v / m).astype(np.float32)
         
-        data.append((x, H, y))
+        data.append((x, H_in, H_out, y))
         
     return data
 
 import jax.scipy.linalg
 
 def collate_hypergraphs(
-    batch: List[Tuple[np.ndarray, np.ndarray, np.ndarray]],
+    batch: List[Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]],
     num_devices: int = 1
-) -> Tuple[Float[Array, "B N_max d"], Float[Array, "B N_max M_max"], Float[Array, "B N_max 1"], Float[Array, "B N_max"]]:
+) -> Tuple[Float[Array, "B N_max d"], Float[Array, "B N_max M_max"], Float[Array, "B N_max M_max"], Float[Array, "B N_max 1"], Float[Array, "B N_max"]]:
     """
-    Collates a batch of hypergraphs by stacking them (with padding).
-    Preserves the batch dimension to allow per-sample attention.
-    If num_devices > 1, reshapes to (num_devices, sub_batch, ...).
-    
-    Args:
-        batch: List of (x, H, y) tuples.
-        num_devices: Number of devices to shard for.
-        
-    Returns:
-        x_batch: (..., N_max, d)
-        H_batch: (..., N_max, M_max)
-        y_batch: (..., N_max, 1) or (..., N_max, y_dim)
-        mask: (..., N_max) - 1 for valid nodes, 0 for padded
+    Collates a batch of causal hypergraphs.
     """
-    xs, Hs, ys = zip(*batch)
+    xs, H_ins, H_outs, ys = zip(*batch)
     batch_size = len(batch)
     
     # 1. Determine Max Dimensions
-    # We find the max N and M across the *entire* batch to ensure uniform shape.
     max_n = max(x.shape[0] for x in xs)
-    max_m = max(h.shape[1] for h in Hs)
+    max_m_in = max(h.shape[1] for h in H_ins)
+    max_m_out = max(h.shape[1] for h in H_outs)
+    max_m = max(max_m_in, max_m_out)
     
     # Determine shapes and types from first sample
     if xs[0].ndim == 1:
-        # 1D features (e.g. token IDs)
         feature_shape = ()
         dtype_x = np.int32
     else:
@@ -160,16 +139,18 @@ def collate_hypergraphs(
         y_shape = (y_dim,)
         
     # 2. Allocate Padding Arrays
-    # Shapes: [Batch, MaxN, ...]
     final_x = np.zeros((batch_size, max_n) + feature_shape, dtype=dtype_x)
-    final_H = np.zeros((batch_size, max_n, max_m), dtype=np.float32)
+    final_H_in = np.zeros((batch_size, max_n, max_m), dtype=np.float32)
+    final_H_out = np.zeros((batch_size, max_n, max_m), dtype=np.float32)
     final_y = np.zeros((batch_size, max_n) + y_shape, dtype=dtype_y)
     final_mask = np.zeros((batch_size, max_n), dtype=np.float32)
     
     # 3. Fill Arrays
     for i in range(batch_size):
-        x, H, y = xs[i], Hs[i], ys[i]
-        n, m = H.shape
+        x, H_in, H_out, y = xs[i], H_ins[i], H_outs[i], ys[i]
+        n = x.shape[0]
+        m_in = H_in.shape[1]
+        m_out = H_out.shape[1]
         
         # Fill x
         if x.ndim == 1:
@@ -178,7 +159,8 @@ def collate_hypergraphs(
             final_x[i, :n, :] = x
             
         # Fill H
-        final_H[i, :n, :m] = H
+        final_H_in[i, :n, :m_in] = H_in
+        final_H_out[i, :n, :m_out] = H_out
         
         # Fill y
         if y.ndim == 1:
@@ -196,14 +178,15 @@ def collate_hypergraphs(
         
         # Reshape to [num_devices, sub_batch, ...]
         final_x = final_x.reshape((num_devices, sub_batch, max_n) + feature_shape)
-        final_H = final_H.reshape((num_devices, sub_batch, max_n, max_m))
+        final_H_in = final_H_in.reshape((num_devices, sub_batch, max_n, max_m))
+        final_H_out = final_H_out.reshape((num_devices, sub_batch, max_n, max_m))
         final_y = final_y.reshape((num_devices, sub_batch, max_n) + y_shape)
         final_mask = final_mask.reshape((num_devices, sub_batch, max_n))
         
-    return final_x, final_H, final_y, final_mask
+    return final_x, final_H_in, final_H_out, final_y, final_mask
 
 def get_dataloader(
-    data: List[Tuple[np.ndarray, np.ndarray, np.ndarray]],
+    data: List[Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]],
     batch_size: int,
     shuffle: bool = True,
     seed: int = 42,

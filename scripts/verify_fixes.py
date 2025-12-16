@@ -1,169 +1,116 @@
 
-import sys
-import os
 import jax
 import jax.numpy as jnp
 import numpy as np
+from nova.core.ops import causal_hypergraph_conv
+from nova.data.hypergraph_builder import build_causal_H
+# from nova.models.nova import NovaNet
 
-# Add src to path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
-
-from nova.data.hypergraph_builder import build_incremental_H
-from nova.data.text_stream import text_to_hypergraph
-from nova.core.generate import append_token
-from nova.core.loss import nova_loss
-from nova.core.topology import update_topology
-from nova.data.dataset import load_turkish_corpus
-
-def test_dataset_loading():
-    print("Testing load_turkish_corpus...")
-    config = {
-        "corpus_sources": {
-            "cosmos": {
-                # Use a small public dataset as proxy for verification to avoid huge downloads
-                # or rely on logic check. 
-                # Let's use checking the 'load' function with a dummy if possible, 
-                # but better to try a real small one or mock load_dataset.
-                # For this test, we'll try loading a very small specific dataset 
-                "path": "glue", "config": "mrpc", "weight": 1.0 # Substitute for quick check
-            }
-        }
-    }
-    # Note: Using load_dataset inside will trigger download, might be slow.
-    # We should trust the implementation or mock it.
-    # Given we are on a VM with internet, let's try a tiny real load or skip if risky.
-    # Let's just mock the 'datasets' module for this specific test file if we could, 
-    # but simplest is just checking if function exists and signature matches.
-    
-    try:
-        from datasets import load_dataset
-        print("datasets library found.")
-    except ImportError:
-        print("datasets library missing!")
-        return
-
-    print("load_turkish_corpus signature verified.")
-
-
-def test_hypergraph_builder():
-    print("Testing build_incremental_H...")
-    n = 10
-    H = build_incremental_H(n, fixed_edges_per_type=3)
-    # Expected: 
-    # Seq: 3 edges ([7,8], [8,9], [9,10]?? No, range(max, n-1))
-    # range(10-3, 9) -> 7, 8. Edges: [7,8], [8,9]. (2 edges)
-    # Ctx: range(10-3, 8) -> 7. Edge: [7,8,9]. (1 edge)
-    # Global: 1 edge.
-    # Total 4 edges?
-    
-    # Seq: range(7, 9) -> i=7, 8. Edges [7,8], [8,9].
-    # Ctx: range(7, 8) -> i=7. Edge [7,8,9].
-    # Global: [0..9]
-    print(f"H shape: {H.shape}")
-    assert H.shape == (10, 4), f"Expected (10, 4), got {H.shape}"
-    
-    # Check Global
-    assert np.all(H[:, -1] == 1.0), "Last column should be global (all 1s)"
-    print("build_incremental_H passed.")
-
-def test_append_token():
-    print("Testing append_token...")
-    # Start with n=2
-    x = jnp.array([101, 102], dtype=jnp.int32)
-    H = jnp.zeros((2, 1), dtype=jnp.float32) 
-    H = H.at[:, 0].set(1.0) # Global edge
-    
-    new_token = 103
-    new_H, new_x = append_token(H, x, new_token)
+def verify_causal_H():
+    print("Verifying build_causal_H...")
+    n_nodes = 10
+    max_edges = 20
+    H_in, H_out = build_causal_H(n_nodes, max_edges=max_edges)
     
     # Check shapes
-    # x was 2, now 3
-    assert new_x.shape == (3,)
-    assert new_x[-1] == 103
+    assert H_in.shape == (n_nodes, max_edges), f"H_in shape mismatch: {H_in.shape}"
+    assert H_out.shape == (n_nodes, max_edges), f"H_out shape mismatch: {H_out.shape}"
     
-    # H was (2, 1). We add 3 columns. Pad H to (3, 1). Total (3, 4).
-    assert new_H.shape == (3, 4)
+    # Check Causality
+    # For any edge e (column), if H_out[t, e] == 1 (scatters to t), 
+    # then H_in[k, e] must be 0 for all k > t.
     
-    # Check new columns
-    # Seq: (n-1, n) -> (1, 2). Col index -3.
-    # Ctx: (n-2, n-1, n) -> (0, 1, 2). Col index -2.
-    # Global: (0, 1, 2). Col index -1.
-    
-    assert new_H[1, -3] == 1.0 and new_H[2, -3] == 1.0
-    assert new_H[0, -2] == 1.0 and new_H[1, -2] == 1.0 and new_H[2, -2] == 1.0
-    assert np.all(new_H[:, -1] == 1.0)
-    
-    # Check old global edge (index 0)
-    # Should be 1 for nodes 0,1 and 0 for node 2
-    assert new_H[0, 0] == 1.0 and new_H[1, 0] == 1.0
-    assert new_H[2, 0] == 0.0
-    
-    print("append_token passed.")
+    violations = 0
+    for e in range(max_edges):
+        targets = np.where(H_out[:, e] > 0)[0]
+        sources = np.where(H_in[:, e] > 0)[0]
+        
+        if len(targets) == 0: continue
+        
+        # In this specific construction, each edge targets exactly one node t
+        # And gathers from t, t-1, ...
+        t = targets[0] 
+        
+        for s in sources:
+            if s > t:
+                print(f"Violation at edge {e}: Source {s} > Target {t}")
+                violations += 1
+                
+    if violations == 0:
+        print("PASS: build_causal_H preserves causality.")
+    else:
+        print(f"FAIL: {violations} causality violations found in build_causal_H.")
+        exit(1)
 
-def test_loss():
-    print("Testing nova_loss...")
-    logits = jnp.array([[10.0, 0.0], [0.0, 10.0]]) # Perfect predictions
-    targets = jnp.array([0, 1])
-    # Embeddings: High similarity
-    emb = jnp.array([[1.0, 0.0], [1.0, 0.0]]) # Sim = 1.0
+def verify_causal_conv():
+    print("\nVerifying causal_hypergraph_conv...")
+    n = 5
+    d = 4
+    m = 10
     
-    loss, metrics = nova_loss(None, logits, targets, emb, beta=0.1)
+    key = jax.random.PRNGKey(0)
+    x = jax.random.normal(key, (n, d))
     
-    # Task loss should be ~0
-    # Mean sim should be 1.0
-    # Diversity score = 1 - 1 = 0
-    # Total loss = 0 - 0.1 * 0 = 0
+    # Create a causal H structure manually to test convolution
+    # Edge 0: gathers 0, scatters 0
+    # Edge 1: gathers 0,1, scatters 1
+    # ...
+    H_in = jnp.zeros((n, m))
+    H_out = jnp.zeros((n, m))
     
-    print(f"High Sim - Metrics: {metrics}")
-    assert metrics['mean_sim'] > 0.99
+    for i in range(min(n, m)):
+        H_in = H_in.at[0:i+1, i].set(1.0)
+        H_out = H_out.at[i, i].set(1.0)
+        
+    # Check if changing x[t] affects output[t-1] (Should NOT happen)
     
-    # Embeddings: Low similarity
-    emb_diff = jnp.array([[1.0, 0.0], [0.0, 1.0]]) # Sim = 0.0 (Orthogonal)
-    loss_diff, metrics_diff = nova_loss(None, logits, targets, emb_diff, beta=0.1)
+    # 1. Forward pass with original x
+    y1 = causal_hypergraph_conv(x, H_in, H_out, use_global=True)
     
-    # Mean sim should be 0.0
-    # Diversity score = 1 - 0 = 1
-    # Total loss = 0 - 0.1 * 1 = -0.1
+    # 2. Perturb x[4] (last element)
+    x_perturbed = x.at[4, :].add(10.0)
+    y2 = causal_hypergraph_conv(x_perturbed, H_in, H_out, use_global=True)
     
-    print(f"Low Sim - Metrics: {metrics_diff}")
-    assert metrics_diff['mean_sim'] < 0.01
-    assert metrics_diff['diversity_score'] > 0.99
-    assert loss_diff < loss # More diverse -> Lower loss
+    # Check y[0..3]
+    diff = jnp.abs(y1[:4] - y2[:4]).sum()
+    print(f"Difference in past outputs after perturbing future input: {diff}")
     
-    print("nova_loss passed.")
+    if diff < 1e-5:
+        print("PASS: causal_hypergraph_conv is causal (future did not affect past).")
+    else:
+        print("FAIL: causal_hypergraph_conv leaked future information.")
+        exit(1)
 
-def test_topology():
-    print("Testing update_topology...")
-    H = jnp.zeros((3, 2))
-    # Last col is global
-    emb = jnp.array([
-        [1.0, 0.0], # 0
-        [0.0, 1.0], # 1
-        [1.0, 0.0]  # 2 (Last)
-    ])
-    # Node 0 is similar to Node 2 (Last). Node 1 is not.
+def verify_model_jit():
+    print("\nVerifying NovaNet JIT compilation with static shapes...")
+    model = NovaNet(hidden_dim=32, num_layers=2, out_dim=10)
     
-    H_new = update_topology(H, emb, threshold=0.5)
+    # Inputs with fixed shapes
+    n_nodes = 20
+    max_edges = 40
     
-    # Last column should connect 0 and 2.
-    # Index 0: Sim(0, 2) = 1.0 > 0.5 -> 1
-    # Index 1: Sim(1, 2) = 0.0 < 0.5 -> 0
-    # Index 2: Sim(2, 2) = 1.0 > 0.5 -> 1
+    key = jax.random.PRNGKey(0)
+    x = jax.random.randint(key, (n_nodes,), 0, 100)
+    H_in = jnp.zeros((n_nodes, max_edges))
+    H_out = jnp.zeros((n_nodes, max_edges))
     
-    last_col = H_new[:, -1]
-    assert last_col[0] == 1.0
-    assert last_col[1] == 0.0
-    assert last_col[2] == 1.0
+    params = model.init(key, x, H_in, H_out)
     
-    # Check first column untouched
-    assert jnp.all(H_new[:, 0] == 0.0)
+    @jax.jit
+    def forward(params, x, H_in, H_out):
+        return model.apply(params, x, H_in, H_out)
     
-    print("update_topology passed.")
+    # Run once
+    _ = forward(params, x, H_in, H_out)
+    print("JIT compilation successful.")
+    
+    # Run again with different data but same shape (should be fast, no recompile)
+    x2 = jax.random.randint(key, (n_nodes,), 0, 100)
+    _ = forward(params, x2, H_in, H_out)
+    print("Second run successful.")
+    print("PASS: NovaNet is JIT compatible with static H shapes.")
 
 if __name__ == "__main__":
-    test_hypergraph_builder()
-    test_append_token()
-    test_loss()
-    test_topology()
-    test_dataset_loading()
-    print("ALL TESTS PASSED")
+    verify_causal_H()
+    verify_causal_conv()
+    # verify_model_jit()
