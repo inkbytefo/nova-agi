@@ -138,8 +138,8 @@ def run_benchmark():
     
     # Pre-compute Hypergraph Structure (Static for this benchmark)
     logger.info("Pre-computing Hypergraph Topology...")
-    max_edges = SEQ_LEN * 8
-    H_in_static, H_out_static = build_causal_H(SEQ_LEN, max_edges=max_edges, window_sizes=[2, 3])
+    max_edges = SEQ_LEN * 16 # Increased for long-range edges
+    H_in_static, H_out_static = build_causal_H(SEQ_LEN, max_edges=max_edges, window_sizes=[2, 3], add_long_range=True)
     
     # Expand to batch
     H_in_batch = np.tile(H_in_static[None, ...], (BATCH, 1, 1))

@@ -47,18 +47,31 @@ Bu yapı sayesinde, $t$ anındaki düğüm güncellemesi için asla $t+1$ bilgis
 
 ---
 
-## 3. Çekirdek Mekanizma: Causal Hypergraph Convolution
+## 3. Çekirdek Mekanizma: Gated Causal Hypergraph Convolution
 
 Modelin kalbi, `nova.core.ops.causal_hypergraph_conv` içerisinde tanımlanan algoritmadır.
 
-### 3.1. Mesajlaşma Süreci
+### 3.1. Gated Mesajlaşma Süreci (Sparse Attention)
+
+NovaNet, klasik hipergraf konvolüsyonunu "Gating" mekanizması ile güçlendirerek içerik tabanlı adreslemeyi (Content-Based Addressing) mümkün kılar.
 
 $$
-E = \sigma(H_{in}^T X) \quad \text{(Gather: Node to Edge)}
+E_{src} = H_{in}^T X \quad \text{(Gather: Source Information)}
 $$
 $$
-X_{local} = H_{out} E \quad \text{(Scatter: Edge to Node)}
+E_{tgt} = H_{out}^T X \quad \text{(Query: Target Information)}
 $$
+$$
+\text{Gate} = \sigma(W_{gate}[E_{src} || E_{tgt}])
+$$
+$$
+E_{final} = \text{ReLU}(W_{edge} E_{src}) \odot \text{Gate}
+$$
+$$
+X_{local} = H_{out} E_{final} \quad \text{(Scatter: Edge to Node)}
+$$
+
+Bu yapı, modelin geçmişten gelen bilgiyi (Source) şimdiki durumuna (Target) göre filtrelemesini sağlar.
 
 ### 3.2. Causal Global Context (Kümülatif Toplam)
 Eski "Global Edge" yaklaşımı, tüm dizinin ortalamasını aldığı için geleceği sızdırıyordu (Leakage). NovaNet bunu **Prefix Scan (Cumulative Sum)** ile değiştirmiştir:
@@ -81,6 +94,7 @@ JAX ve XLA (Accelerated Linear Algebra) üzerinde yüksek performans için "Stat
 
 *   **Sorun:** Metin uzunluğu değiştikçe hipergrafın kenar sayısı da değişir. Bu, JAX'in sürekli "Re-compilation" yapmasına neden olurdu.
 *   **Çözüm (Static Padding):** `max_edges` parametresi ile (örn. 4096) hipergraf matrisleri ($H_{in}, H_{out}$) sabit boyutta tutulur. Kullanılmayan kenarlar "0" ile doldurulur (Zero-padding).
+*   **Long-Range Edges (Dilated):** `HypergraphBuilder` artık her düğüm $t$ için $t-1, t-2, t-4, \dots$ şeklinde logaritmik uzaklıktaki düğümlere bağlanan kenarlar üretir. Bu, modelin çok uzak geçmişe $O(\log N)$ adımda erişmesini sağlar.
 *   **Sonuç:** Tek bir derleme (Compilation) ile tüm eğitim süreci kesintisiz ve maksimum hızda devam eder.
 
 ---

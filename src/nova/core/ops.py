@@ -54,16 +54,15 @@ def causal_hypergraph_conv(
     """
     # 1. Node-to-Edge (Gather)
     # E = H_in^T * X
-    # Normalize? Standard GCN uses degree normalization.
-    # D_e = sum(H_in, axis=0) -> Edge degree (number of nodes in edge)
     edge_features = jnp.matmul(jnp.swapaxes(H_in, -1, -2), x) # (..., m, d)
     
-    # Edge Normalization (Optional but recommended)
-    # edge_deg = jnp.sum(H_in, axis=-2, keepdims=True) # (..., 1, m)
-    # edge_features = edge_features / (jnp.swapaxes(edge_deg, -1, -2) + eps)
-    
-    # Activation
-    edge_features = activation(edge_features)
+    # Target Features (Query) for Gating/Attention
+    # Which node is this edge going to?
+    target_features = jnp.matmul(jnp.swapaxes(H_out, -1, -2), x) # (..., m, d)
+
+    # Activation / Interaction
+    # We pass both source (gathered) and target (query) features to allow content-based addressing.
+    edge_features = activation(edge_features, target_features)
     
     # 2. Edge-to-Node (Scatter)
     # X_local = H_out * E

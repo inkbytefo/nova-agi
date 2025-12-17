@@ -47,12 +47,23 @@ class HypergraphLayer(nn.Module):
         
         # 2. Edge Transformation Logic preparation
         dense_edge = nn.Dense(self.features, name='W_edge')
+        gate_proj = nn.Dense(1, name='W_gate')
 
-        def edge_update_fn(edge_feats):
-            # Apply linear transformation
+        def edge_update_fn(edge_feats, target_feats):
+            # edge_feats: Source info (Value/Key)
+            # target_feats: Target info (Query)
+            
+            # 1. Transform Source
             e = dense_edge(edge_feats)
-            # Apply non-linearity (ReLU)
-            return nn.relu(e)
+            e = nn.relu(e)
+            
+            # 2. Gating Mechanism (Sparse Attention)
+            # Decide how much of 'e' should flow to 'target' based on compatibility
+            # Simple Gated Linear Unit variant
+            combined = jnp.concatenate([edge_feats, target_feats], axis=-1)
+            gate = nn.sigmoid(gate_proj(combined))
+            
+            return e * gate
 
         # 3. Core Causal Convolution
         out = causal_hypergraph_conv(
